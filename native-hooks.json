@@ -551,6 +551,16 @@
       "name": "screen_mouse_button_released_pre",
       "version": 1,
       "target": "horizon_client::game::native_hooks::Game<'_>::native_screen_mouse_button_released_pre"
+    },
+    {
+      "name": "camera_shake",
+      "version": 1,
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_camera_shake"
+    },
+    {
+      "name": "shader_params",
+      "version": 1,
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_shader_params"
     }
   ]
 }

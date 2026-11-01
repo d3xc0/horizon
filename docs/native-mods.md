@@ -639,6 +639,24 @@ server each ask their own mods, so both need the mod. Bundles that use it need `
 
 API 80 adds the open screen hears of a mouse button going down (`native_screen_mouse_button_pressed_pre`) or up (`native_screen_mouse_button_released_pre`) before it acts, as vanilla's `ScreenEvent.MouseButtonPressed.Pre` and `.MouseButtonReleased.Pre`: the screen, the GLFW button (0 left, 1 right, 2 middle, 3 back, 4 forward; a button past those is the platform's own number, which differs between systems) and GLFW's modifier bits (shift 1, control 2, alt 4, super 8), with the pointer in `screen.mouse`. A cancelled press goes no further (no slot, screen button, drag or hotbar key); cancel a release only when its press was cancelled, or a drag it ended stays held. They fire on the window only, never on the title screen itself (Options and the pack list opened from it do fire), the connect and loading screens, the prompts, books and sign editors drawn over gameplay, or while a world loads or saves, and never for a gamepad or keyboard-focus click. Bundles need "hooks": 80.
 
+API 81 adds [falling blocks](#falling-blocks) for server mods: `native_spawn_falling_block(dimension, state, pos, velocity, falling)`
+throws a block that flies, lands and places itself as sand does, for debris and collapsing structures. Bundles that
+use it need `"hooks": 81`.
+
+API 82 adds camera shake for client mods: `native_camera_shake(partial, shake)` asks each frame for turns in degrees and an
+offset in blocks, which add up across mods and multiply into the view after its bobbing. Horizon scales the sum by
+Distortion Effects and bounds it to 10 degrees and half a block on each axis. Bundles that use it need
+`"hooks": 82`.
+
+API 83 adds client sounds that wait: `native_play_local_sound(sound, at, volume, pitch, delay)` plays a sound event, vanilla's or
+the mod's own from its `assets/<id>/sounds.json`, for this player only and up to a minute later, so a client mod
+can time a blast's sound to its shock wave. Bundles that use it need `"hooks": 83`.
+
+API 84 adds values for a mod's own shader pack: `native_shader_params(partial, params)` asks each frame for eight `vec4`s that
+every stage of a Horizon shader pack reads as `frame.mods`, so a mod can tell the pack it bundles where and when
+something happened (an explosion's centre and age for a cloud drawn in a post pass). Bundles that use it need
+`"hooks": 84`.
+
 ## What the launcher does
 
 In the window: install a native mod from the Mods page, into the instance picked on the left ("Installs into

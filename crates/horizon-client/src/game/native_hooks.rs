@@ -6,6 +6,15 @@
 //! Horizon's own HUD extras do, and keep a mod's settings where the
 //! WebAssembly mod of the same id kept them.
 //!
+//! API 84 adds values for a mod's own shader pack (`native_shader_params`).
+//!
+//! API 83 adds client sounds that wait (`native_play_local_sound`).
+//!
+//! API 82 adds camera shake for client mods (`native_camera_shake`).
+//!
+//! API 81 adds falling blocks for server mods (`native_spawn_falling_block`,
+//! in `native_falling.rs`).
+//!
 //! API 80 adds the open screen hears of a mouse button going down or up before it acts
 //! (`native_screen_mouse_button_pressed_pre`, `native_screen_mouse_button_released_pre`, the
 //! `ScreenEvent.MouseButtonPressed.Pre` and `.MouseButtonReleased.Pre` points, with the screen, the
@@ -327,7 +336,7 @@ pub(super) use horizon_world::level::flags;
 /// The hook points' API version. The launcher reads this line from the
 /// source it builds; keep its form.
 #[allow(dead_code)]
-pub(crate) const NATIVE_HOOKS_API: u32 = 80;
+pub(crate) const NATIVE_HOOKS_API: u32 = 84;
 
 impl GameLevel<'_> {
     /// An authoritative server committed a changed state through `Level.setBlock`.
@@ -1247,7 +1256,7 @@ impl Game<'_> {
     /// and your offset in blocks, along the camera's right, up and back, to
     /// `shake`, so several mods' shakes add up. Read while playing only;
     /// Horizon scales the sum by Distortion Effects and bounds it
-    /// (`native_shake_matrix`). API @API:native_camera_shake@.
+    /// (`native_shake_matrix`). API 82.
     pub(super) fn native_camera_shake(&self, partial: f32, shake: &mut NativeShake) {
         let _ = (partial, shake);
     }
@@ -1258,7 +1267,7 @@ impl Game<'_> {
     /// pack reads; a mod that bundles its pack as `native-<mod id>` is the
     /// one that pack is for. Asked once a frame while a pack is on; a value
     /// that isn't finite reads as 0 (`native_shader_params_now`). API
-    /// @API:native_shader_params@.
+    /// 84.
     pub(super) fn native_shader_params(&self, partial: f32, params: &mut [[f32; 4]; 8]) {
         let _ = (partial, params);
     }
@@ -2760,7 +2769,7 @@ impl Game<'_> {
     /// as vanilla's attenuation does (16 blocks times the volume). False, with
     /// nothing played, on a server or for a value out of range; an event the
     /// resources don't have plays nothing, as vanilla's. API
-    /// @API:native_local_sound@.
+    /// 83.
     pub(super) fn native_play_local_sound(
         &mut self,
         sound: &str,
