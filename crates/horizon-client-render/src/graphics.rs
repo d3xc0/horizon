@@ -771,7 +771,7 @@ pub struct Graphics {
     /// is made (start, resource-pack reload), like `translucent_batching`, where it is offered
     /// (`smooth_gradients_offered`).
     pub hdr_smooth_gradients: bool,
-    /// The shader pack picked in `shaderpacks/` (`shader_pack_list`); empty: none. Its key is
+    /// The native `horizon:<manifest-id>` or classic filename picked in `shaderpacks/`; empty: none. Its key is
     /// not `shaderPack`, which versions before the clean-room rewrite saved and which stays
     /// ignored.
     pub shader_pack: String,
@@ -1099,11 +1099,15 @@ impl Graphics {
         // (horizon_threads: niced on Linux; on macOS and Windows the server
         // and render threads are raised above four cores, where vanilla
         // raises its server thread). Leaving two idled a core of a 4-thread
-        // laptop while a world loaded: a teleport there took ~15% longer.
+        // laptop while a world loaded: a teleport there took ~15% longer. On Apple
+        // silicon only the performance cores count (horizon_threads::default_workers).
+        let auto = horizon_threads::jobs::default_threads();
         // Android keeps a second core free until phones are profiled.
-        let auto = horizon_threads::worker_count()
-            .saturating_sub(if cfg!(target_os = "android") { 2 } else { 1 })
-            .max(1);
+        let auto = if cfg!(target_os = "android") {
+            auto.saturating_sub(1).max(1)
+        } else {
+            auto
+        };
         if self.battery { auto.div_ceil(2) } else { auto }
     }
     /// The frame cap battery mode adds: 60 in a world, 30 in menus without a
@@ -1486,7 +1490,10 @@ mod tests {
         let g = Graphics::default();
         assert_eq!(g.workers, 0);
         let cores = horizon_threads::worker_count();
-        assert_eq!(g.worker_threads(), cores.saturating_sub(1).max(1));
+        assert!((1..=cores.saturating_sub(1).max(1)).contains(&g.worker_threads()));
+        if !cfg!(target_vendor = "apple") {
+            assert_eq!(g.worker_threads(), cores.saturating_sub(1).max(1));
+        }
         // A manual count is the player's own choice, kept as asked.
         let manual = Graphics { workers: 3, ..g };
         assert_eq!(manual.worker_threads(), 3);

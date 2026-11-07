@@ -73,9 +73,6 @@ struct Mixer {
     #[cfg(feature = "audio")]
     device_lost: bool,
 }
-#[cfg(feature = "audio")]
-type DeviceProbe = (Option<String>, Option<String>, Vec<String>);
-
 /// A camera's forward, up and right vectors.
 type Basis = ([f64; 3], [f64; 3], [f64; 3]);
 impl Mixer {
@@ -271,13 +268,43 @@ pub struct Audio {
     /// The other half of `lastSeenDevices`: every output device last seen.
     #[cfg(feature = "audio")]
     devices_seen: Vec<String>,
-    /// Wall-clock time of the last device query; the launcher ticks per frame.
+    /// Ticks since the output devices were last looked at (`DeviceTracker.tick`).
     #[cfg(feature = "audio")]
-    device_probe_started: std::time::Instant,
-    /// One in-flight device query. CPAL discovery can block for hundreds of
-    /// milliseconds on Android, so the render thread only receives its result.
+    device_ticks: u32,
+    /// The look at the output devices running on its own thread, until a tick
+    /// takes its answer: listing them can take 100 ms (#11490).
     #[cfg(feature = "audio")]
-    device_probe: Option<std::sync::mpsc::Receiver<DeviceProbe>>,
+    device_probe: Option<PendingProbe>,
+}
+/// What one look at the output devices found: the system default, the
+/// fingerprint, and the device list when those say it may have changed.
+#[cfg(feature = "audio")]
+struct DeviceProbe {
+    default: Option<String>,
+    cards: Option<String>,
+    devices: Option<Vec<String>>,
+}
+#[cfg(feature = "audio")]
+type PendingProbe = Arc<Mutex<Option<DeviceProbe>>>;
+/// Looks at the output devices as `should_change_device` did on the render
+/// thread: the device list only when the default or the fingerprint moved.
+#[cfg(feature = "audio")]
+fn probe_devices(default_seen: Option<String>, cards_seen: Option<String>) -> DeviceProbe {
+    let default = default_output_name();
+    let cards = card_fingerprint();
+    // Listing the devices probes every one (on Linux every built-in PCM,
+    // printing ALSA's errors for the plugins this system lacks; on macOS
+    // every Core Audio device, about 90 ms with twenty of them; on Windows
+    // every endpoint, with no fingerprint to skip it); only the fingerprint's
+    // devices can change the list, and it is cheap.
+    let devices = (default != default_seen
+        || cards_changed(cards_seen.as_deref(), cards.as_deref()))
+    .then(output_devices);
+    DeviceProbe {
+        default,
+        cards,
+        devices,
+    }
 }
 fn decode(path: &Path) -> Option<(Vec<f32>, u32, u16)> {
     use symphonia::core::{
@@ -873,27 +900,50 @@ fn cards_changed(seen: Option<&str>, cards: Option<&str>) -> bool {
     }
 }
 
+/// The buffer size to request for `open_device`. On Linux the ALSA backend's
+/// `BufferSize::Default` means a ~100 ms buffer, so sound effects come out
+/// about 100 ms late: request a short fixed buffer (1024 frames) by default.
+/// An environment override `HORIZON_AUDIO_BUFFER` can specify `default` or a
+/// custom frame count (e.g. 2048) when the default short buffer underruns
+/// (e.g. PipeWire min-quantum >= 1024).
+#[cfg(feature = "audio")]
+fn target_buffer_size(
+    range: (u32, u32),
+    var: impl Fn(&str) -> Option<std::ffi::OsString>,
+) -> Option<cpal::BufferSize> {
+    if let Some(val) = var("HORIZON_AUDIO_BUFFER").and_then(|v| v.into_string().ok()) {
+        if val == "default" {
+            return Some(cpal::BufferSize::Default);
+        }
+        if let Ok(frames) = val.parse::<u32>() {
+            return Some(cpal::BufferSize::Fixed(frames.clamp(range.0, range.1)));
+        }
+    }
+    #[cfg(target_os = "linux")]
+    {
+        Some(cpal::BufferSize::Fixed(1024u32.clamp(range.0, range.1)))
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        None
+    }
+}
+
 /// The cpal `StreamConfig` to open an output stream with. On Linux the ALSA
 /// backend's `BufferSize::Default` means a ~100 ms buffer, so sound effects
 /// come out about 100 ms late: request a short fixed buffer there. Other
 /// platforms keep cpal's default behaviour.
 #[cfg(feature = "audio")]
 fn audio_stream_config(config: &cpal::SupportedStreamConfig) -> cpal::StreamConfig {
-    #[cfg(target_os = "linux")]
-    {
-        let range = match config.buffer_size() {
-            cpal::SupportedBufferSize::Range { min, max } => (*min, *max),
-            cpal::SupportedBufferSize::Unknown => (256, 4096),
-        };
-        let target = 1024u32.clamp(range.0, range.1);
-        let mut sc = config.config();
-        sc.buffer_size = cpal::BufferSize::Fixed(target);
-        sc
+    let mut sc = config.config();
+    let range = match config.buffer_size() {
+        cpal::SupportedBufferSize::Range { min, max } => (*min, *max),
+        cpal::SupportedBufferSize::Unknown => (256, 4096),
+    };
+    if let Some(bs) = target_buffer_size(range, |name| std::env::var_os(name)) {
+        sc.buffer_size = bs;
     }
-    #[cfg(not(target_os = "linux"))]
-    {
-        config.config()
-    }
+    sc
 }
 
 #[cfg(feature = "audio")]
@@ -1001,6 +1051,17 @@ impl Audio {
         };
         let mut engine = SoundEngine::new(registry);
         engine.loaded = live;
+        #[cfg(feature = "audio")]
+        let cards = if live { card_fingerprint() } else { None };
+        // Where the cards gate the list (Linux, macOS), it starts empty: opening the
+        // output does not need it, and listing it probes every device; the first
+        // change fills it. Elsewhere it starts with every device listed, as before.
+        #[cfg(feature = "audio")]
+        let devices = if live && cards.is_none() {
+            output_devices()
+        } else {
+            Vec::new()
+        };
         Self {
             _stream: stream,
             device_name: target_device.to_owned(),
@@ -1027,13 +1088,13 @@ impl Audio {
             stopped: Default::default(),
             preview: Default::default(),
             #[cfg(feature = "audio")]
-            default_seen: None,
+            default_seen: if live { default_output_name() } else { None },
             #[cfg(feature = "audio")]
-            cards_seen: None,
+            cards_seen: cards,
             #[cfg(feature = "audio")]
-            devices_seen: Vec::new(),
+            devices_seen: devices,
             #[cfg(feature = "audio")]
-            device_probe_started: std::time::Instant::now(),
+            device_ticks: 0,
             #[cfg(feature = "audio")]
             device_probe: None,
         }
@@ -1195,7 +1256,7 @@ impl Audio {
             #[cfg(feature = "audio")]
             devices_seen: self.devices_seen.clone(),
             #[cfg(feature = "audio")]
-            device_probe_started: std::time::Instant::now(),
+            device_ticks: 0,
             #[cfg(feature = "audio")]
             device_probe: None,
         }
@@ -1216,39 +1277,11 @@ impl Audio {
         }
         self.engine.listening = self.record_heard;
     }
-    /// Start one device query without ever making the audio/render thread wait
-    /// for CPAL or the operating system. At most one query is alive per `Audio`.
-    #[cfg(feature = "audio")]
-    fn start_device_probe(&self) -> Option<std::sync::mpsc::Receiver<DeviceProbe>> {
-        let previous_default = self.default_seen.clone();
-        let previous_cards = self.cards_seen.clone();
-        let previous_devices = self.devices_seen.clone();
-        let (sender, receiver) = std::sync::mpsc::sync_channel(1);
-        match std::thread::Builder::new()
-            .name("Audio device probe".into())
-            .spawn(move || {
-                let default = default_output_name();
-                let cards = card_fingerprint();
-                let devices = if default == previous_default
-                    && !cards_changed(previous_cards.as_deref(), cards.as_deref())
-                {
-                    previous_devices
-                } else {
-                    output_devices()
-                };
-                let _ = sender.send((default, cards, devices));
-            }) {
-            Ok(_) => Some(receiver),
-            Err(error) => {
-                log::warn!("Horizon: could not start the audio device probe: {error}");
-                None
-            }
-        }
-    }
     /// `SoundEngine.shouldChangeDevice`: the open device was lost, the system
     /// default changed (with no device chosen in the options), or the chosen
-    /// device came back; the output is then opened again. Device discovery runs
-    /// off-thread once a second; this function only polls its completed result.
+    /// device came back; the output is then opened again. The devices are looked
+    /// at once a second, on a thread of their own: a later tick reads what it
+    /// found.
     #[cfg(feature = "audio")]
     fn should_change_device(&mut self) -> bool {
         // A splitscreen share plays through the first player's output: it leaves the device,
@@ -1262,51 +1295,73 @@ impl Audio {
         };
         if lost {
             log::info!("Horizon: audio device was lost");
-            self.default_seen = None;
-            self.devices_seen.clear();
-            self.device_probe_started = std::time::Instant::now();
+            self.device_probe = None;
+            self.default_seen = default_output_name();
+            self.cards_seen = card_fingerprint();
+            self.devices_seen = output_devices();
             return true;
         }
-        let mut found = None;
-        if let Some(result) = self.device_probe.as_ref().map(|probe| probe.try_recv()) {
-            match result {
-                Ok(value) => {
-                    found = Some(value);
-                    self.device_probe = None;
-                }
-                Err(std::sync::mpsc::TryRecvError::Empty) => {}
-                Err(std::sync::mpsc::TryRecvError::Disconnected) => self.device_probe = None,
-            }
+        if let Some(pending) = &self.device_probe {
+            let Some(probe) = pending.lock().ok().and_then(|mut found| found.take()) else {
+                return false;
+            };
+            self.device_probe = None;
+            return self.devices_changed(probe, current);
         }
-        let mut changed = false;
-        if let Some((default, cards, devices)) = found {
-            self.cards_seen = cards;
-            if default != self.default_seen || devices != self.devices_seen {
-                // Only a change in the device lists is looked at, as in vanilla: a
-                // preferred device that is listed but cannot open is not retried.
-                self.default_seen = default.clone();
-                let wanted = self.device_name.clone();
-                let available = devices.contains(&wanted);
-                self.devices_seen = devices;
-                if wanted.is_empty() {
-                    changed = default.as_deref().is_some_and(|d| d != current);
-                    if changed {
-                        log::info!("Horizon: system default audio device has changed");
-                    }
-                } else {
-                    changed = current != wanted && available;
-                    if changed {
-                        log::info!("Horizon: preferred audio device has become available");
-                    }
-                }
-            }
+        self.device_ticks += 1;
+        if self._stream.is_none() || self.device_ticks < 20 {
+            return false;
         }
-        if self._stream.is_some()
-            && self.device_probe.is_none()
-            && self.device_probe_started.elapsed() >= std::time::Duration::from_secs(1)
-        {
-            self.device_probe_started = std::time::Instant::now();
-            self.device_probe = self.start_device_probe();
+        self.device_ticks = 0;
+        let pending = PendingProbe::default();
+        let out = Arc::clone(&pending);
+        let seen = (self.default_seen.clone(), self.cards_seen.clone());
+        let started = std::thread::Builder::new()
+            .name("audio-devices".into())
+            .spawn(move || {
+                let probe = probe_devices(seen.0, seen.1);
+                if let Ok(mut found) = out.lock() {
+                    *found = Some(probe);
+                }
+            });
+        match started {
+            Ok(_) => self.device_probe = Some(pending),
+            Err(e) => log::warn!("Horizon: could not look at the audio devices: {e}"),
+        }
+        false
+    }
+    /// The rest of `shouldChangeDevice` with what a look at the devices found,
+    /// `current` being the device playing now.
+    #[cfg(feature = "audio")]
+    fn devices_changed(&mut self, probe: DeviceProbe, current: String) -> bool {
+        let DeviceProbe {
+            default,
+            cards,
+            devices,
+        } = probe;
+        let Some(devices) = devices else {
+            return false;
+        };
+        self.cards_seen = cards;
+        // Only a change in the device lists is looked at, as in vanilla: a
+        // preferred device that is listed but cannot open is not retried.
+        if default == self.default_seen && devices == self.devices_seen {
+            return false;
+        }
+        self.default_seen = default.clone();
+        let wanted = self.device_name.clone();
+        let available = devices.contains(&wanted);
+        self.devices_seen = devices;
+        if wanted.is_empty() {
+            let changed = default.as_deref().is_some_and(|d| d != current);
+            if changed {
+                log::info!("Horizon: system default audio device has changed");
+            }
+            return changed;
+        }
+        let changed = current != wanted && available;
+        if changed {
+            log::info!("Horizon: preferred audio device has become available");
         }
         changed
     }
@@ -1847,6 +1902,42 @@ mod tests {
         );
     }
     #[test]
+    #[cfg(feature = "audio")]
+    fn buffer_size_override_and_defaults() {
+        let env = |pairs: &'static [(&'static str, &'static str)]| {
+            move |name: &str| {
+                pairs
+                    .iter()
+                    .find(|(k, _)| *k == name)
+                    .map(|(_, v)| std::ffi::OsString::from(*v))
+            }
+        };
+        let range = (256, 4096);
+        assert_eq!(
+            target_buffer_size(range, env(&[("HORIZON_AUDIO_BUFFER", "default")])),
+            Some(cpal::BufferSize::Default)
+        );
+        assert_eq!(
+            target_buffer_size(range, env(&[("HORIZON_AUDIO_BUFFER", "2048")])),
+            Some(cpal::BufferSize::Fixed(2048))
+        );
+        assert_eq!(
+            target_buffer_size(range, env(&[("HORIZON_AUDIO_BUFFER", "100")])),
+            Some(cpal::BufferSize::Fixed(256))
+        );
+        assert_eq!(
+            target_buffer_size(range, env(&[("HORIZON_AUDIO_BUFFER", "10000")])),
+            Some(cpal::BufferSize::Fixed(4096))
+        );
+        #[cfg(target_os = "linux")]
+        assert_eq!(
+            target_buffer_size(range, env(&[])),
+            Some(cpal::BufferSize::Fixed(1024))
+        );
+        #[cfg(not(target_os = "linux"))]
+        assert_eq!(target_buffer_size(range, env(&[])), None);
+    }
+    #[test]
     fn linear_attenuation_reaches_zero_at_the_max_distance() {
         assert_eq!(distance_gain(None, 100.0), 1.0);
         assert_eq!(distance_gain(Some(16.0), 0.0), 1.0);
@@ -2172,23 +2263,6 @@ mod tests {
         let mut data = [0.0; 2];
         mix(&mut m, &mut data, 1, 48_000);
         assert_eq!(data, [0.5; 2]);
-    }
-    #[cfg(feature = "audio")]
-    #[test]
-    fn pending_device_discovery_does_not_block_tick() {
-        let mut audio = Audio::silent(Path::new("missing-audio-test-resources"));
-        audio.backend.mixer.lock().unwrap().device_name = "primary".into();
-        audio.default_seen = Some("primary".into());
-        audio.devices_seen = vec!["primary".into()];
-        let (tx, rx) = std::sync::mpsc::channel();
-        audio.device_probe = Some(rx);
-        assert!(!audio.should_change_device());
-        assert!(audio.device_probe.is_some());
-        tx.send((Some("headphones".into()), None, vec!["headphones".into()]))
-            .unwrap();
-        assert!(audio.should_change_device());
-        assert!(audio.device_probe.is_none());
-        assert_eq!(audio.default_seen.as_deref(), Some("headphones"));
     }
 
     #[test]

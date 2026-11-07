@@ -342,11 +342,21 @@ impl Settings {
             .map_or(-1, |i| i as i32)
     }
     pub fn load(path: &Path) -> Self {
-        let horizon = path
+        let mut horizon = path
             .parent()
             .map(crate::graphics::Graphics::load)
             .unwrap_or_default();
         crate::mipmap::set_dither_cutouts(horizon.dither_cutout_mips);
+        if let Some(dir) = path.parent() {
+            let (key, _) = crate::shader_pack_list::resolve(
+                &crate::logging::shared_dir(dir).join(crate::shader_pack_list::DIR),
+                &horizon.shader_pack,
+            );
+            if key != horizon.shader_pack {
+                horizon.shader_pack = key;
+                horizon.save(dir);
+            }
+        }
         let controller = path
             .parent()
             .map(crate::gamepad::PadSettings::load)
@@ -867,6 +877,7 @@ pub enum Opt {
     TouchAutoSprint,
     PadEnabled,
     PadVibration,
+    PadPlayInBackground,
     PadAdaptiveTriggers,
     PadLightbar,
     PadLookSensitivity,
@@ -882,6 +893,7 @@ pub enum Opt {
     PadTriggerThreshold,
     PadGlyphs,
     PadKeyboard,
+    PadGameplayGuide,
     /// `options.modelPart.*`: one skin layer (index into `options_file::MODEL_PARTS`).
     ModelPart(usize),
     /// 3D skin layers: the player's outer layer as extruded slabs.

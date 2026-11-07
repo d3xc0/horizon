@@ -83,6 +83,8 @@ rustix = { version = "1", default-features = false, features = ["std", "time", "
 default = ["audio"]
 audio = ["horizon-client-render/audio", "horizon-client-lib/audio"]
 controllers = []
+# Discord Rich Presence is desktop-only; the shared game code names the feature.
+discord = []
 
 [lints]
 workspace = true
