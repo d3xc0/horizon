@@ -213,17 +213,8 @@ impl Wardrobe {
         if self.worker.is_some() {
             return;
         }
-        let Some(provider) = self.provider else {
+        if self.provider.is_none() {
             self.note = "Offline appearance is local to this installation.".into();
-            return;
-        };
-        if provider == Provider::Ely && action.is_some() {
-            self.note =
-                "Ely.by cloud skins are managed at ely.by. Custom capes can be applied locally."
-                    .into();
-            if let Err(error) = crate::platform::open_login_url("https://ely.by/skins") {
-                self.note = error;
-            }
             return;
         }
         let key = self.key.clone();
@@ -595,11 +586,7 @@ impl Wardrobe {
             if !self.capes {
                 entry(
                     ui,
-                    if self.provider == Some(Provider::Microsoft) {
-                        "Upload selected skin to Microsoft"
-                    } else {
-                        "Manage Ely.by cloud skin on website"
-                    },
+                    "Upload selected skin to Microsoft",
                     Action::WardrobeUpload,
                     false,
                     &mut row,

@@ -15,8 +15,7 @@ mod game_launch;
 #[path = "android/launcher.rs"]
 mod launcher;
 // The fork's launcher search, compatibility checks, downloads, dependency
-// resolution, Ely.by accounts and Java content porting; GPUI is desktop-only.
-// Kept as Android's own copy: upstream's launcher dropped the Ely.by provider.
+// resolution, Microsoft accounts and Java content porting; GPUI is desktop-only.
 #[path = "android/dns.rs"]
 mod android_dns;
 #[path = "android/catalog.rs"]

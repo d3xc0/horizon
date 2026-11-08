@@ -654,9 +654,6 @@ fn callback_inner(ui: &Ui) -> i32 {
 pub fn show(text: &str) -> bool {
     show_mode(text, false)
 }
-pub fn show_secret(text: &str) -> bool {
-    show_mode(text, true)
-}
 fn show_mode(text: &str, secret: bool) -> bool {
     if let Some(ui) = UI.get().filter(|ui| !ui.failed.load(Ordering::Acquire)) {
         winit::platform::android::set_native_text_input_active(true);

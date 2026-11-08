@@ -261,14 +261,12 @@ impl Launcher {
                 crate::platform::hide();
                 self.login.providers = true;
                 self.login.offline = false;
-                self.login.ely = false;
                 self.login.choosing = false;
                 self.login.visible = true;
             }
             Some(Action::OfflineAccount | Action::MicrosoftAccount) => {
                 self.login.providers = false;
                 self.login.offline = matches!(action, Some(Action::OfflineAccount));
-                self.login.ely = false;
                 self.login.choosing = false;
                 self.login.visible = true;
             }
@@ -276,7 +274,6 @@ impl Launcher {
                 self.login.providers = false;
                 self.login.refresh_status();
                 self.login.choosing = true;
-                self.login.ely = false;
             }
             Some(Action::SavedPage(next)) => {
                 if next && self.login.account_offset + 5 < self.login.saved_accounts.len() {
@@ -322,22 +319,6 @@ impl Launcher {
                         &self.catalog.config.name,
                         &self.catalog.config.microsoft_client_id,
                     );
-                }
-            }
-            Some(Action::ElySignIn) => {
-                self.login.providers = false;
-                self.login.close();
-                self.login.ely = true;
-                self.login.visible = true;
-            }
-            Some(Action::SubmitEly) => {
-                self.catalog.editing = None;
-                crate::platform::hide();
-                self.session_ready = false;
-                self.prepared_session = None;
-                self.session_worker = None;
-                if !self.login.pending() {
-                    self.login.start_ely();
                 }
             }
             Some(Action::CloseLogin) => {
@@ -441,15 +422,6 @@ impl Launcher {
                 self.catalog.config.save(&self.home)?;
             }
             Some(Action::Field(name)) => {
-                if let Some(value) = self.login.field(name) {
-                    self.catalog.editing = Some(name);
-                    if name == "ely_password" || name == "ely_otp" {
-                        crate::platform::show_secret(value);
-                    } else {
-                        crate::platform::show(value);
-                    }
-                    return Ok(());
-                }
                 if name == "render_scale" {
                     self.catalog.render_scale_text =
                         self.catalog.config.render_scale.percent().to_string();

@@ -1,6 +1,6 @@
 //! Provider-specific cloud operations. Local selection never calls these APIs.
 use super::{read_cape, read_skin, Model, MAX_IMPORT_BYTES};
-use crate::account::{Account, Provider, Secrets};
+use crate::account::{Account, Secrets};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
@@ -91,35 +91,11 @@ pub fn fetch(account: &Account, secrets: &Secrets, root: &Path) -> Result<Cache,
     if account.provider != secrets.provider() {
         return Err("Account and session providers do not match.".into());
     }
-    let snapshot = match account.provider {
-        Provider::Microsoft => official_snapshot(&response(
-            crate::account::request_to("GET", PROFILE)
-                .set("Authorization", &format!("Bearer {}", secrets.game_token()))
-                .call(),
-        )?),
-        Provider::Ely => {
-            let value = response(
-                crate::account::request_to(
-                    "GET",
-                    &format!("https://skinsystem.ely.by/textures/{}", account.name),
-                )
-                .call(),
-            )?;
-            let texture = |key: &str| {
-                value[key]["url"].as_str().map(|url| Texture {
-                    id: format!("ely-{key}"),
-                    title: format!("Current Ely.by {}", key.to_lowercase()),
-                    url: url.into(),
-                    active: true,
-                    slim: value[key]["metadata"]["model"] == "slim",
-                })
-            };
-            Snapshot {
-                skins: texture("SKIN").into_iter().collect(),
-                capes: texture("CAPE").into_iter().collect(),
-            }
-        }
-    };
+    let snapshot = official_snapshot(&response(
+        crate::account::request_to("GET", PROFILE)
+            .set("Authorization", &format!("Bearer {}", secrets.game_token()))
+            .call(),
+    )?);
     let skin = snapshot
         .skins
         .iter()
@@ -146,7 +122,7 @@ fn texture_url(text: &str) -> Result<String, String> {
     let mut url = url::Url::parse(text).map_err(|_| "Invalid cloud texture URL.")?;
     let allowed = matches!(
         url.host_str(),
-        Some("textures.minecraft.net" | "ely.by" | "skinsystem.ely.by")
+        Some("textures.minecraft.net")
     );
     if !allowed
         || !url.username().is_empty()
@@ -204,9 +180,6 @@ fn upload_skin_at(
     if account.provider != secrets.provider() {
         return Err("Account and session providers do not match.".into());
     }
-    if account.provider != Provider::Microsoft {
-        return Err("Ely.by cloud skins are managed on ely.by; its public API does not expose skin uploads.".into());
-    }
     let image = read_skin(bytes)?;
     let mut png = std::io::Cursor::new(vec![]);
     image
@@ -238,12 +211,6 @@ fn activate_cape_at(
 ) -> Result<(), String> {
     if account.provider != secrets.provider() {
         return Err("Account and session providers do not match.".into());
-    }
-    if account.provider != Provider::Microsoft {
-        return Err(
-            "Ely.by does not offer user-selectable cloud capes. Choose a local cape instead."
-                .into(),
-        );
     }
     if let Some(id) = id {
         // Re-fetch ownership immediately before activation. Never offer unowned official capes.
@@ -357,11 +324,11 @@ mod tests {
         assert_eq!(snapshot.capes[0].id, "owned");
         assert!(!snapshot.capes[0].active);
         assert!(texture_url("https://textures.minecraft.net.attacker.test/x").is_err());
-        assert!(texture_url("https://token@ely.by/x").is_err());
+        assert!(texture_url("https://token@textures.minecraft.net/x").is_err());
         assert!(texture_url("file:///private").is_err());
         assert_eq!(
-            texture_url("http://ely.by/storage/skin.png").unwrap(),
-            "https://ely.by/storage/skin.png"
+            texture_url("http://textures.minecraft.net/texture/abc").unwrap(),
+            "https://textures.minecraft.net/texture/abc"
         );
     }
 }

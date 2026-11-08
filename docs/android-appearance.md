@@ -18,23 +18,10 @@ cape that the account owns. No unowned official cape is offered for activation.
 Cloud synchronization and image downloads run off the UI thread. A failed cloud
 request leaves the local gallery available.
 
-Ely.by sign-in uses its documented Minecraft authentication protocol, including
-the optional six-digit two-factor code. Passwords and codes are not saved. Ely.by
-access/client tokens use the existing protected credential store, under a separate
-provider key; they are not Microsoft credentials or proof of Java ownership.
-The game's session file identifies the provider and selects the matching session
-join service. Ely.by accounts work with servers configured for that provider;
-they cannot authenticate as Microsoft accounts on Microsoft-only servers.
-
-Ely.by's public skins API exposes current skin/cape downloads, but does not
-document a skin-upload API. Cloud skin management therefore opens Ely.by's site.
-Its documented cape system does not allow players to equip arbitrary cloud capes;
-custom cape choices remain local.
-
 ## Frontend and engine boundary
 
-`launcher/src/account.rs` and `account/ely.rs` implement account operations and
-credential storage. `skins/{library,cloud,preview}.rs` provide the frontend-neutral
+`launcher/src/account.rs` implements Microsoft account operations and credential
+storage; Microsoft is the only sign-in provider. `skins/{library,cloud,preview}.rs` provide the frontend-neutral
 wardrobe, provider operations and textured 3D preview. Android's `wardrobe.rs` is a
 view over these APIs. No UI object is passed into the game.
 
@@ -69,24 +56,19 @@ the stored index.
 code using mock credentials and services. Android builds use
 `python tools/android_build.py --abi x86_64 --check` (or a device ABI).
 UI and game checks must use fresh emulator/app data. Mock API tests do not prove
-live Microsoft or Ely.by account permissions; real sign-in and cloud mutation
+live Microsoft account permissions; real sign-in and cloud mutation
 require the account owner and an appropriately configured service/application.
-
-Protocol references: [Ely.by Minecraft authentication](https://docs.ely.by/en/minecraft-auth.html),
-[Ely.by skins](https://docs.ely.by/en/skins-system.html).
 
 ### Verification on 2026-11-02
 
 - Shared account/wardrobe harness: 65 passed, one existing ignored test. Includes
-  Microsoft/Offline regression tests, provider isolation, Ely.by 2FA/refresh HTTP
-  fixtures, Microsoft PNG upload/owned-cape HTTP fixtures and game-handoff reset.
+  Microsoft/Offline regression tests, provider isolation, Microsoft PNG upload/owned-cape HTTP fixtures and game-handoff reset.
 - Android API 35 x86_64 VM: 24 engine tests passed (auth, skin processing, handoff).
 - ARM64 Android type-check and Clippy with warnings denied passed.
 - Android source/release Python tests: 13 passed.
 - Fresh emulator, host GPU, 1280x800: imported a skin and cape through Files,
   rejected an invalid-size PNG, selected local designs, rotated/zoomed the model,
-  switched Classic/Slim, checked persistence, Ely.by validation and secure-field
-  keyboard layout. No real account credentials were used.
+  switched Classic/Slim, checked persistence and keyboard layout. No real account credentials were used.
 - Created a superflat Creative world on the default server thread. Third-person
   views showed the imported skin and cape. Returned to the launcher, changed to
   Classic and a different cape, and reopened the world in the same process: both
@@ -99,10 +81,8 @@ checks. Generated 26.3 tables came from the fork's published 0.7.6 APK; original
 resources were downloaded by the installer inside the disposable emulator. A
 release APK with freshly prepared tables was not validated here.
 
-Live Microsoft/Ely.by sign-in, real cloud mutations and an Ely.by server connection
-still require account-owner testing. Provider-specific skins of other players on
-Ely.by servers are not extended by this change; the gallery and local-player
-handoff load the signed-in account's current public textures.
+Live Microsoft sign-in and real cloud mutations still require account-owner
+testing. The gallery and local-player handoff load the signed-in account's current public textures.
 
 The full desktop `pr_ready --quick --base android` is not green: Python discovery
 collides on the existing `test_basic_feature_parity` module, and strict workspace

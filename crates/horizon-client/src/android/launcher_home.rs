@@ -573,7 +573,6 @@ impl Launcher {
                 &mut ui,
                 &mut self.targets,
                 &self.catalog.config.name,
-                self.catalog.editing,
             );
         }
         if let Some(chooser) = &mut self.chooser {

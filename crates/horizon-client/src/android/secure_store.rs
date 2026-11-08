@@ -18,8 +18,6 @@ pub struct AndroidStore;
 fn path(key: &str) -> Result<PathBuf, String> {
     if key.is_empty()
         || !key
-            .strip_prefix("ely-")
-            .unwrap_or(key)
             .bytes()
             .all(|c| c.is_ascii_hexdigit() || c == b'-')
     {

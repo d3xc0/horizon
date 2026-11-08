@@ -249,7 +249,7 @@ mod tests {
         assert!(Library::image(&root, "../private").is_err());
         assert!(
             library
-                .select(&root, "ely:Player", "missing", Kind::Skin)
+                .select(&root, "msa:Player", "missing", Kind::Skin)
                 .is_err()
         );
         library

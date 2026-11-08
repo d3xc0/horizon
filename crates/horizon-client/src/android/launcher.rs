@@ -84,17 +84,7 @@ impl Launcher {
         if self.edit_home(&output) {
             return;
         }
-        if self.login.edit(self.catalog.editing, &output) {
-            if matches!(
-                output,
-                horizon_client::osk::Output::Enter | horizon_client::osk::Output::Close
-            ) {
-                self.catalog.editing = None;
-                crate::platform::hide();
-            }
-        } else {
-            self.catalog.edit(output, &self.home);
-        }
+        self.catalog.edit(output, &self.home);
     }
     pub(super) fn new(home: PathBuf) -> Self {
         // Upgrade existing installations that retained the old download cache.

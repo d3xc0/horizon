@@ -9,10 +9,6 @@ pub(super) struct Login {
     pub offline: bool,
     pub saved_accounts: Vec<Account>,
     pub account_offset: usize,
-    pub ely: bool,
-    pub username: String,
-    pub password: String,
-    pub otp: String,
     pub visible: bool,
     pub signed_in: bool,
     pub profile: Option<String>,
@@ -29,10 +25,6 @@ impl Login {
             offline: false,
             saved_accounts: vec![],
             account_offset: 0,
-            ely: false,
-            username: String::new(),
-            password: String::new(),
-            otp: String::new(),
             visible: false,
             signed_in: false,
             profile: None,
@@ -88,13 +80,9 @@ impl Login {
         self.task.is_some()
     }
     pub fn hide(&mut self) {
-        self.password.clear();
-        self.otp.clear();
         self.visible = false;
     }
     pub fn close(&mut self) {
-        self.password.clear();
-        self.otp.clear();
         self.auto_open_device = false;
         if let Some(task) = self.task.take() {
             task.cancel();
@@ -108,7 +96,6 @@ impl Login {
     }
     pub fn start_device(&mut self, id: &str) {
         self.close();
-        self.ely = false;
         self.choosing = false;
         self.visible = true;
         let id = id.trim();
@@ -152,44 +139,6 @@ impl Login {
             self.open_link();
         }
         completed
-    }
-    pub fn start_ely(&mut self) {
-        if let Some(task) = self.task.take() {
-            task.cancel();
-        }
-        self.message.clear();
-        self.task = Some(SignIn::start_ely(
-            self.username.clone(),
-            std::mem::take(&mut self.password),
-            std::mem::take(&mut self.otp),
-        ));
-        self.state = Some(SignInState::Starting);
-    }
-    pub fn field(&self, name: &str) -> Option<&str> {
-        match name {
-            "ely_username" => Some(&self.username),
-            "ely_password" => Some(&self.password),
-            "ely_otp" => Some(&self.otp),
-            _ => None,
-        }
-    }
-    pub fn edit(&mut self, field: Option<&str>, output: &horizon_client::osk::Output) -> bool {
-        let value = match field {
-            Some("ely_username") => &mut self.username,
-            Some("ely_password") => &mut self.password,
-            Some("ely_otp") => &mut self.otp,
-            _ => return false,
-        };
-        match output {
-            horizon_client::osk::Output::Text(text) if value.len() + text.len() <= 1024 => {
-                value.push_str(text);
-            }
-            horizon_client::osk::Output::Backspace => {
-                value.pop();
-            }
-            _ => {}
-        }
-        true
     }
     pub fn sign_out(&mut self) {
         self.close();
@@ -244,7 +193,6 @@ impl Login {
         ui: &mut Ui,
         targets: &mut Vec<([f32; 4], Action)>,
         offline_name: &str,
-        editing: Option<&str>,
     ) {
         targets.clear();
         crate::launcher_view::scrim(ui);
@@ -270,7 +218,6 @@ impl Login {
             for (index, (label, action)) in [
                 ("Offline", Action::OfflineAccount),
                 ("Microsoft", Action::MicrosoftAccount),
-                ("Ely.by", Action::ElySignIn),
                 ("Saved accounts", Action::SavedAccounts),
             ]
             .into_iter()
@@ -319,15 +266,7 @@ impl Login {
                 .skip(self.account_offset)
                 .take(5)
             {
-                let label = format!(
-                    "{} · {}",
-                    account.name,
-                    if account.provider == account::Provider::Ely {
-                        "Ely.by"
-                    } else {
-                        "Microsoft"
-                    }
-                );
+                let label = format!("{} · Microsoft", account.name);
                 button(
                     ui,
                     targets,
@@ -364,116 +303,6 @@ impl Login {
                 [x + 20.0, y + h - 52.0, w - 40.0, 36.0],
                 "Back",
                 Action::Account,
-                false,
-            );
-            return;
-        }
-        if self.ely {
-            ui.text(
-                Face::Display,
-                26.0,
-                x + 20.0,
-                y + 18.0,
-                color::TEXT,
-                "Ely.by account",
-            );
-            ui.text(
-                Face::Regular,
-                13.0,
-                x + 20.0,
-                y + 54.0,
-                color::MUTED,
-                "Credentials go only to authserver.ely.by.",
-            );
-            for (index, (label, name, value, secret)) in [
-                (
-                    "Username or email",
-                    "ely_username",
-                    self.username.as_str(),
-                    false,
-                ),
-                (
-                    "Password (not saved)",
-                    "ely_password",
-                    self.password.as_str(),
-                    true,
-                ),
-                (
-                    "Two-factor code (optional)",
-                    "ely_otp",
-                    self.otp.as_str(),
-                    true,
-                ),
-            ]
-            .into_iter()
-            .enumerate()
-            {
-                let active = editing.is_some_and(|field| field.starts_with("ely_"));
-                if active && editing != Some(name) {
-                    continue;
-                }
-                let top = y + 86.0 + if active { 0.0 } else { index as f32 * 72.0 };
-                ui.text(Face::Regular, 13.0, x + 20.0, top, color::MUTED, label);
-                let display = if secret {
-                    "*".repeat(value.chars().count().min(40))
-                } else {
-                    value.into()
-                };
-                button(
-                    ui,
-                    targets,
-                    [x + 20.0, top + 20.0, w - 40.0, 38.0],
-                    &display,
-                    Action::Field(name),
-                    false,
-                );
-            }
-            if editing.is_some_and(|field| field.starts_with("ely_")) {
-                button(
-                    ui,
-                    targets,
-                    [x + 20.0, y + h - 52.0, w - 40.0, 36.0],
-                    "Done editing",
-                    Action::FinishNameEdit,
-                    true,
-                );
-                return;
-            }
-            let message = ui.fit_text(Face::Regular, 13.0, &self.message, w - 40.0);
-            ui.text(
-                Face::Regular,
-                13.0,
-                x + 20.0,
-                y + 310.0,
-                color::TEXT,
-                &message,
-            );
-            button(
-                ui,
-                targets,
-                [x + 20.0, y + h - 142.0, w - 40.0, 38.0],
-                if self.pending() {
-                    "Signing in..."
-                } else {
-                    "Sign in to Ely.by"
-                },
-                Action::SubmitEly,
-                true,
-            );
-            button(
-                ui,
-                targets,
-                [x + 20.0, y + h - 96.0, w - 40.0, 36.0],
-                "Back to accounts",
-                Action::Account,
-                false,
-            );
-            button(
-                ui,
-                targets,
-                [x + 20.0, y + h - 52.0, w - 40.0, 36.0],
-                "Done",
-                Action::CloseLogin,
                 false,
             );
             return;

@@ -11,8 +11,6 @@
 //!
 //! The Azure app (client ID) is Horizon's own and is configuration: `HORIZON_MSA_CLIENT_ID` at
 //! build time, or at run time to override it. Without one, sign-in says it is not configured.
-#[path = "account/ely.rs"]
-pub mod ely;
 #[path = "account/session.rs"]
 pub mod session;
 
@@ -591,14 +589,12 @@ pub struct Account {
 pub enum Provider {
     #[default]
     Microsoft,
-    Ely,
 }
 impl Account {
     /// Provider-qualified identity; legacy Microsoft keychain keys stay unchanged.
     pub fn key(&self) -> String {
         match self.provider {
             Provider::Microsoft => self.uuid.clone(),
-            Provider::Ely => format!("ely-{}", self.uuid),
         }
     }
 }
@@ -740,18 +736,6 @@ fn check_with(
             "The saved account provider does not match this session. Sign in again.".into(),
             secrets,
         );
-    }
-    if secrets.sign_in_required {
-        return Check::NoAnswer(SIGN_IN_AGAIN.into(), secrets);
-    }
-    if account.provider == Provider::Ely {
-        return match ely::refresh(account, &secrets) {
-            Ok((account, secrets)) => Check::Owns(account, secrets),
-            Err(error) => {
-                secrets.sign_in_required = error == ely::REFUSED;
-                Check::NoAnswer(error, secrets)
-            }
-        };
     }
     if secrets.sign_in_required {
         return Check::NoAnswer(SIGN_IN_AGAIN.into(), secrets);
@@ -1295,6 +1279,7 @@ pub fn store() -> &'static dyn SecretStore {
 /// accounts.json: the signed-in accounts and the one that plays. Never a token.
 #[derive(Clone, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct Accounts {
+    #[serde(deserialize_with = "known_accounts")]
     pub accounts: Vec<Account>,
     /// The UUID of the account the game starts with; none plays offline.
     pub selected: Option<String>,
@@ -1308,6 +1293,16 @@ pub struct Accounts {
     /// Each offline name's skin and cape (`skins`), by the name in lowercase.
     #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
     pub looks: std::collections::BTreeMap<String, crate::skins::Look>,
+}
+
+/// Accounts saved by an older build for a provider this one does not support (Ely.by) are
+/// dropped on load instead of failing the whole file.
+fn known_accounts<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Vec<Account>, D::Error> {
+    let values: Vec<Value> = serde::Deserialize::deserialize(d)?;
+    Ok(values
+        .into_iter()
+        .filter_map(|v| serde_json::from_value(v).ok())
+        .collect())
 }
 
 /// Who plays, as the quick switch lists them.
@@ -1647,10 +1642,9 @@ pub fn launch(
             Check::DoesNot(secrets) => (Some(DOES_NOT_OWN.to_string()), secrets),
             Check::NoAnswer(e, secrets) => (Some(e), secrets),
         };
-        owned = (secrets.provider == Provider::Microsoft
+        owned = secrets.provider == Provider::Microsoft
             && account.provider == Provider::Microsoft
-            && secrets.owns)
-            || (plays && account.provider == Provider::Ely && pass.session.is_some());
+            && secrets.owns;
         if plays {
             pass.offline = said;
         }
@@ -1734,7 +1728,7 @@ pub fn write_session_file(
         "name": account.name,
         "uuid": account.uuid,
         "access_token": secrets.minecraft_token,
-        "user_type": if account.provider == Provider::Ely { "ely" } else { "msa" },
+        "user_type": "msa",
         "xuid": secrets.xuid,
     });
     std::io::Write::write_all(&mut file, body.to_string().as_bytes()).map_err(|e| e.to_string())?;
@@ -1792,33 +1786,6 @@ pub struct SignIn {
 }
 
 impl SignIn {
-    pub fn start_ely(username: String, password: String, otp: String) -> Self {
-        use std::sync::atomic::Ordering;
-        let state = std::sync::Arc::new(Mutex::new(SignInState::Starting));
-        let cancel = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
-        let (thread_state, thread_cancel) = (state.clone(), cancel.clone());
-        std::thread::spawn(move || {
-            let result = (|| {
-                let (account, secrets) = ely::authenticate(&username, &password, &otp)?;
-                let store = store();
-                let _operation = session::lock(store)?;
-                let mut accounts = Accounts::load();
-                accept_sign_in(
-                    &mut accounts,
-                    store,
-                    None,
-                    account.clone(),
-                    &secrets,
-                    &|| thread_cancel.load(Ordering::Relaxed),
-                    &|_| {},
-                )?;
-                accounts.save()?;
-                Ok(account)
-            })();
-            *thread_state.lock().unwrap() = SignInState::Done(result);
-        });
-        Self { state, cancel }
-    }
     pub fn start() -> Self {
         Self::start_with_client_id(client_id())
     }
@@ -2000,3 +1967,20 @@ fn java_player_with(
 #[cfg(test)]
 #[path = "account/tests.rs"]
 mod tests;
+
+#[cfg(test)]
+mod unsupported_provider_tests {
+    use super::*;
+    #[test]
+    fn accounts_of_unsupported_providers_are_dropped_on_load() {
+        let accounts: Accounts = serde_json::from_str(
+            r#"{"accounts":[{"provider":"ely","uuid":"0123456789abcdef0123456789abcdef","name":"Old"},
+            {"provider":"microsoft","uuid":"069a79f444e94726a5befca90e38aaf5","name":"Notch"}],
+            "selected":"ely-0123456789abcdef0123456789abcdef"}"#,
+        )
+        .unwrap();
+        assert_eq!(accounts.accounts.len(), 1);
+        assert_eq!(accounts.accounts[0].name, "Notch");
+        assert!(accounts.selected().is_none());
+    }
+}
