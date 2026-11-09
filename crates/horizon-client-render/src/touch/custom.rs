@@ -189,13 +189,25 @@ impl TouchControls {
     pub(super) fn draw_custom(&self, b: &mut HudBatch, a: &HudAtlas) {
         for (i, button) in self.settings.custom_buttons.iter().enumerate() {
             let p = self.custom_placement(i);
-            if p.opacity <= 0.0 {
+            let opacity = if self.editor.is_some() {
+                p.opacity.max(0.25)
+            } else {
+                p.opacity
+            };
+            if opacity <= 0.0 {
                 continue;
             }
             let pressed = self.custom_fingers.values().any(|k| *k == button.key);
-            let color = rgba(255, 255, 255, draw::alpha(p.opacity));
+            let color = rgba(255, 255, 255, draw::alpha(opacity));
             let bounds = draw::square(b, p.center, p.size);
             draw::button(b, a, bounds, &button.label(), pressed, color);
+            if self
+                .editor
+                .as_ref()
+                .is_some_and(|e| e.selected_custom == Some(i))
+            {
+                self.draw_selection(b, a, bounds);
+            }
         }
     }
 }

@@ -2,6 +2,7 @@
 use super::*;
 
 mod custom;
+mod custom_editor;
 mod editor;
 mod gestures;
 

@@ -7,6 +7,9 @@
 //! pick it to change its size or opacity (or every control's at once), hide
 //! it, or bring hidden ones back from the palette. Reset restores the current
 //! scheme's factory layout; Cancel restores everything as it was opened.
+//! The palette also creates custom buttons, whose key or action is picked
+//! from a list or by pressing it on a keyboard.
+use super::custom::UNASSIGNED;
 use super::{Control, CustomButton, Settings, TouchControls, draw, layout};
 use crate::hud::{HudAtlas, HudBatch, rgba};
 use crate::lang;
@@ -32,6 +35,13 @@ pub struct Editor {
     drag: Option<(u64, Drag)>,
     /// The palette of built-in controls to show or hide is open.
     palette: bool,
+    /// The custom button being edited.
+    pub selected_custom: Option<usize>,
+    /// The key picker is open for `selected_custom`.
+    pub(super) key_picker: bool,
+    pub(super) key_page: usize,
+    /// The picker lists keyboard keys rather than game actions.
+    pub(super) raw_keys: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -82,6 +92,10 @@ impl TouchControls {
             original: self.settings.clone(),
             drag: None,
             palette: false,
+            selected_custom: None,
+            key_picker: false,
+            key_page: 0,
+            raw_keys: false,
         });
     }
 
@@ -120,6 +134,10 @@ impl TouchControls {
         ended: bool,
     ) -> Option<EditorExit> {
         self.clicked |= started;
+        if self.edit_custom(&mut e, id, p, started, ended) {
+            self.editor = Some(e);
+            return None;
+        }
         if started {
             if layout::contains(DONE, p) {
                 self.clear();
@@ -158,6 +176,7 @@ impl TouchControls {
         } else if layout::contains(PALETTE, p) {
             e.palette = !e.palette;
             e.selected = None;
+            e.selected_custom = None;
             e.drag = None;
         } else if e.palette {
             if let Some(index) =
@@ -305,6 +324,7 @@ impl TouchControls {
                 plate(b, a, palette_rect(index), &label, shown);
             }
         }
+        self.draw_custom_editor(b, a, e);
     }
 
     /// The outline round the selected control.
@@ -341,4 +361,271 @@ fn slider_bar(b: &mut HudBatch, a: &HudAtlas, value: f32) {
         h * 0.05,
         rgba(255, 255, 255, 255),
     );
+}
+
+// The custom button panel and the key picker.
+const CREATE: [f32; 4] = [0.22, 0.84, 0.56, 0.07];
+const ACTION: [f32; 4] = [0.32, 0.54, 0.36, 0.07];
+const PICK_ACTIONS: [f32; 4] = [0.15, 0.16, 0.33, 0.06];
+const PICK_KEYS: [f32; 4] = [0.52, 0.16, 0.33, 0.06];
+const PREVIOUS: [f32; 4] = [0.2, 0.86, 0.18, 0.07];
+const BACK: [f32; 4] = [0.41, 0.86, 0.18, 0.07];
+const NEXT: [f32; 4] = [0.62, 0.86, 0.18, 0.07];
+/// Choices on one page of the key picker.
+const PAGE: usize = 8;
+
+/// Key picker row `i`.
+fn key_rect(i: usize) -> [f32; 4] {
+    [0.15, 0.25 + i as f32 * 0.072, 0.7, 0.06]
+}
+
+/// What a custom button can send, as (token, label): the game actions bound
+/// to a key by default, or every keyboard key the game knows.
+pub(super) fn choices(raw_keys: bool) -> Vec<(String, String)> {
+    if raw_keys {
+        crate::key_names::KEYBOARD
+            .iter()
+            .filter(|(_, name)| crate::keybinds::key_code(name).is_some())
+            .map(|(_, name)| {
+                let label = crate::keybinds::display_name(name).plain();
+                ((*name).to_owned(), label)
+            })
+            .collect()
+    } else {
+        crate::keybinds::all_mappings()
+            .filter(|m| m.1 != UNASSIGNED)
+            .map(|(name, _, _)| {
+                let label = crate::text::Text::translate(name, &[]).plain();
+                (format!("action:{name}"), label)
+            })
+            .collect()
+    }
+}
+
+impl TouchControls {
+    /// Custom buttons in the editor: create one from the palette, drag it,
+    /// size it, remove it, or pick its key or action. True when it took the touch.
+    fn edit_custom(
+        &mut self,
+        e: &mut Editor,
+        id: u64,
+        p: [f32; 2],
+        started: bool,
+        ended: bool,
+    ) -> bool {
+        if started && p[1] < PALETTE[1] {
+            return false; // the toolbar
+        }
+        if e.key_picker {
+            if started {
+                self.pick_key(e, p);
+            }
+            return true;
+        }
+        if e.palette {
+            if started && layout::contains(CREATE, p) && self.settings.custom_buttons.len() < 32 {
+                let index = self.settings.custom_buttons.len();
+                let button = CustomButton::new(UNASSIGNED.into(), index);
+                self.settings.custom_buttons.push(button);
+                e.selected = None;
+                e.selected_custom = Some(index);
+                e.key_picker = true;
+                e.raw_keys = false;
+                e.key_page = 0;
+                e.palette = false;
+                e.slider = None;
+                e.drag = None;
+                return true;
+            }
+            return false;
+        }
+        if started && let Some(index) = e.selected_custom {
+            if layout::contains(ACTION, p) {
+                e.key_picker = true;
+                e.key_page = 0;
+                e.drag = None;
+                return true;
+            }
+            if layout::contains(REMOVE, p) {
+                self.settings.custom_buttons.remove(index);
+                e.selected_custom = None;
+                e.drag = None;
+                return true;
+            }
+            if layout::contains(OPACITY, p) {
+                e.slider = Some(Slider::Opacity);
+                return true;
+            }
+            if layout::contains(SIZE, p) {
+                e.slider = Some(Slider::Size);
+                return true;
+            }
+            match e.slider.filter(|_| layout::contains(SLIDER, p)) {
+                Some(slider) => e.drag = Some((id, Drag::Slider(slider))),
+                None => {
+                    e.selected_custom = None;
+                    e.drag = None;
+                }
+            }
+        }
+        if started
+            && e.drag.is_none()
+            && let Some(index) = self.custom_at(p)
+        {
+            let center = self.custom_placement(index).center;
+            e.selected = None;
+            e.selected_custom = Some(index);
+            e.slider = None;
+            e.apply_all = false;
+            e.drag = Some((id, Drag::Control([p[0] - center[0], p[1] - center[1]])));
+        }
+        let Some(index) = e.selected_custom else {
+            return false;
+        };
+        if let Some((owner, drag)) = e.drag
+            && owner == id
+        {
+            self.drag_custom(index, drag, p);
+            if ended {
+                e.drag = None;
+            }
+        }
+        true
+    }
+
+    fn drag_custom(&mut self, index: usize, drag: Drag, p: [f32; 2]) {
+        let aspect = self.aspect();
+        let scale = self.settings.button_scale;
+        let mirror = self.settings.left_handed;
+        let place = &mut self.settings.custom_buttons[index].layouts[self.settings.mode.index()];
+        match drag {
+            Drag::Control(offset) => {
+                let mut center = [p[0] - offset[0], p[1] - offset[1]];
+                if mirror {
+                    center[0] = 1.0 - center[0];
+                }
+                let size = (place.size * scale).min(aspect).min(1.0);
+                let half = [size / aspect / 2.0, size / 2.0];
+                place.center = [
+                    center[0].clamp(half[0], 1.0 - half[0]),
+                    center[1].clamp(half[1], 1.0 - half[1]),
+                ];
+            }
+            Drag::Slider(slider) => {
+                let value = ((p[0] - TRACK[0]) / TRACK[1]).clamp(0.0, 1.0);
+                match slider {
+                    Slider::Size => place.size = SIZES[0] + value * (SIZES[1] - SIZES[0]),
+                    Slider::Opacity => place.opacity = value,
+                }
+            }
+        }
+    }
+
+    /// A tap in the key picker.
+    fn pick_key(&mut self, e: &mut Editor, p: [f32; 2]) {
+        let choices = choices(e.raw_keys);
+        if layout::contains(PICK_ACTIONS, p) || layout::contains(PICK_KEYS, p) {
+            e.raw_keys = layout::contains(PICK_KEYS, p);
+            e.key_page = 0;
+        } else if layout::contains(PREVIOUS, p) {
+            e.key_page = e.key_page.saturating_sub(1);
+        } else if layout::contains(BACK, p) {
+            e.key_picker = false;
+        } else if layout::contains(NEXT, p) {
+            e.key_page = (e.key_page + 1).min(choices.len().saturating_sub(1) / PAGE);
+        } else if let Some((token, _)) = choices
+            .into_iter()
+            .skip(e.key_page * PAGE)
+            .take(PAGE)
+            .enumerate()
+            .find_map(|(i, choice)| layout::contains(key_rect(i), p).then_some(choice))
+            && let Some(index) = e.selected_custom
+        {
+            self.settings.custom_buttons[index].key = token;
+            e.key_picker = false;
+        }
+    }
+
+    /// A key pressed on a keyboard while the key picker is open becomes the
+    /// button's key. False when the picker is closed or the key unknown.
+    pub fn capture_custom_key(&mut self, name: &str) -> bool {
+        if crate::keybinds::key_code(name).is_none() {
+            return false;
+        }
+        let Some(e) = &mut self.editor else {
+            return false;
+        };
+        let Some(index) = e.selected_custom.filter(|_| e.key_picker) else {
+            return false;
+        };
+        self.settings.custom_buttons[index].key = name.into();
+        e.key_picker = false;
+        true
+    }
+
+    fn draw_custom_editor(&self, b: &mut HudBatch, a: &HudAtlas, e: &Editor) {
+        let (w, h) = (b.width, b.height);
+        if e.palette {
+            plate(b, a, CREATE, "Create button...", false);
+        }
+        if let Some(index) = e.selected_custom
+            && !e.palette
+            && !e.key_picker
+        {
+            let button = &self.settings.custom_buttons[index];
+            let p = button.layouts[self.settings.mode.index()];
+            plate(b, a, ACTION, &format!("Action: {}", button.label()), false);
+            plate(b, a, OPACITY, "Opacity", e.slider == Some(Slider::Opacity));
+            plate(b, a, SIZE, "Size", e.slider == Some(Slider::Size));
+            plate(b, a, REMOVE, "Remove button", false);
+            if let Some(slider) = e.slider {
+                b.fill(
+                    a,
+                    w * 0.3,
+                    h * 0.66,
+                    w * 0.4,
+                    h * 0.11,
+                    rgba(15, 15, 15, 235),
+                );
+                let (name, value, percent) = match slider {
+                    Slider::Size => ("Size", (p.size - SIZES[0]) / (SIZES[1] - SIZES[0]), p.size),
+                    Slider::Opacity => ("Opacity", p.opacity, p.opacity),
+                };
+                let text = format!("{name} {:.0}%", percent * 100.0);
+                b.text(
+                    a,
+                    &text,
+                    w * 0.325,
+                    h * 0.68,
+                    rgba(245, 245, 245, 255),
+                    true,
+                );
+                slider_bar(b, a, value);
+            }
+        }
+        if e.key_picker {
+            b.fill(
+                a,
+                w * 0.12,
+                h * 0.14,
+                w * 0.76,
+                h * 0.81,
+                rgba(15, 15, 15, 250),
+            );
+            plate(b, a, PICK_ACTIONS, "Game action", !e.raw_keys);
+            plate(b, a, PICK_KEYS, "Keyboard key", e.raw_keys);
+            let choices = choices(e.raw_keys);
+            for (i, (_, label)) in choices
+                .iter()
+                .skip(e.key_page * PAGE)
+                .take(PAGE)
+                .enumerate()
+            {
+                plate(b, a, key_rect(i), label, false);
+            }
+            plate(b, a, PREVIOUS, "Previous", false);
+            plate(b, a, BACK, "Back", false);
+            plate(b, a, NEXT, "Next", false);
+        }
+    }
 }
