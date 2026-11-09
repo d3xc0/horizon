@@ -2,6 +2,7 @@
 use super::*;
 
 mod custom;
+mod editor;
 mod gestures;
 
 fn role(t: &TouchControls, id: u64) -> Role {

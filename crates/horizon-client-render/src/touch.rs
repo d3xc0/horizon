@@ -13,12 +13,14 @@
 pub mod aim;
 mod custom;
 mod draw;
+mod editor;
 pub mod layout;
 pub use aim::{
     attack_indicator, camera_delta, hotbar_slot, item_places_entity_on_tap, item_uses_on_tap,
     projectile_crosshair, screen_direction,
 };
 pub use custom::CustomButton;
+pub use editor::{Editor, EditorExit};
 pub use layout::{Control, Mode, Placement, Settings};
 
 use crate::gamepad::{Button, PadState};
@@ -93,6 +95,8 @@ pub struct TouchControls {
     pub inventory_mode: bool,
     /// Shift is held in the inventory (the sneak button shows held).
     pub inventory_shift: bool,
+    /// The layout editor, while it is open: it takes every touch.
+    pub editor: Option<Editor>,
     /// A long hold on the world uses the held item instead of mining. Read when
     /// a finger lands, so a change mid-hold (the last apple eaten) can't turn
     /// eating into mining.
@@ -193,7 +197,7 @@ impl TouchControls {
             if !self.visible(c) {
                 return false;
             }
-            if c == Control::Move && self.dynamic_joystick() {
+            if c == Control::Move && self.dynamic_joystick() && self.editor.is_none() {
                 let area = self.dynamic_area();
                 return !self.inventory_mode
                     && area[2] > 0.0
@@ -229,7 +233,7 @@ impl TouchControls {
     fn visible(&self, c: Control) -> bool {
         let visibility = self.settings.button_visibility[c as usize];
         if c == Control::Shield
-            && (!self.shield_available
+            && ((!self.shield_available && self.editor.is_none())
                 || (self.force_crosshair
                     && visibility == layout::FOLLOW_SCHEME
                     && self.settings.button_visibility[Control::Use as usize]

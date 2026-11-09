@@ -19,13 +19,29 @@ const BUTTON_HELD: &str = "gui/sprites/widget/button_highlighted";
 impl TouchControls {
     /// Draws every visible control, then the tap marker in the tap schemes.
     pub fn draw(&self, b: &mut HudBatch, a: &HudAtlas) {
+        if self.editor.is_some() {
+            self.draw_editor_toolbar(b, a);
+        }
         let state = self.state();
         for control in Control::ALL {
             if !self.visible(control) {
                 continue;
             }
             let p = self.placement(control);
-            let color = rgba(255, 255, 255, alpha(p.opacity));
+            // The editor shows invisible controls faintly, so they can be found.
+            let opacity = if self.editor.is_some() {
+                p.opacity.max(0.25)
+            } else {
+                p.opacity
+            };
+            let color = rgba(255, 255, 255, alpha(opacity));
+            if self
+                .editor
+                .as_ref()
+                .is_some_and(|e| e.selected == Some(control))
+            {
+                self.draw_selection(b, a, square(b, p.center, p.size));
+            }
             if control == Control::Move {
                 self.draw_move(b, a, p, &state, color);
                 continue;
@@ -40,7 +56,9 @@ impl TouchControls {
             button(b, a, bounds, &self.label(control), pressed, color);
         }
         self.draw_custom(b, a);
-        if let Some(point) = self.pointer() {
+        if self.editor.is_some() {
+            self.draw_editor(b, a);
+        } else if let Some(point) = self.pointer() {
             let center = [point[0] * b.width, point[1] * b.height];
             let radius = self.settings.circle_size / 2.0;
             ring(b, a, center, radius + 0.7, rgba(0, 0, 0, 110));
@@ -118,8 +136,9 @@ impl TouchControls {
         });
         let center = match anchor {
             Some(anchor) if self.dynamic_joystick() => anchor,
-            // A dynamic joystick only shows while a finger holds it.
-            None if self.dynamic_joystick() => return,
+            // A dynamic joystick only shows while a finger holds it (and in
+            // the editor, at home, so it can be moved).
+            None if self.dynamic_joystick() && self.editor.is_none() => return,
             _ => p.center,
         };
         let [x, y, size, _] = square(b, center, p.size);
