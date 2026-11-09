@@ -17,10 +17,18 @@
 //!   a still hold right-clicks once; LMB and RMB buttons in the lower right
 //!   corner hold a button down for dragging.
 //! - The menu row at the top right: the virtual mouse toggle and Back.
+//! - The auxiliary keys, in a world too: `...` at the top left opens a row
+//!   (F3, F5, Chat, Keys) and a grid of the desktop keys a phone cannot
+//!   type (F1-F12, Tab, Esc, Shift, Ctrl, drop, the advancements...), the
+//!   F3 combos and a held F3. Keys opens Horizon's on-screen keyboard
+//!   ([`crate::osk`]) for typing by touch.
 use crate::hud::{HudAtlas, HudBatch, rgba};
 use crate::lang;
+use crate::osk::{Keyboard, Output};
+use crate::pad_glyph::Glyphs;
+use crate::ui_theme::Ui;
 use crate::widgets::{self, Kind};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::time::{Duration, Instant};
 use winit::{event::TouchPhase, keyboard::KeyCode};
 
@@ -38,9 +46,21 @@ const RIGHT_CLICK_DELAY: Duration = Duration::from_millis(500);
 const ROW_H: f32 = 20.0;
 
 /// Menu touch state: the scroll-or-tap gesture, a slider drag, the virtual
-/// mouse and its held buttons. Ids are the platform's finger ids.
+/// mouse and its held buttons, the auxiliary keys. Ids are the platform's
+/// finger ids.
 #[derive(Default)]
 pub struct TouchUi {
+    /// The auxiliary keys are open (`...`).
+    pub expanded: bool,
+    /// The on-screen keyboard, while open.
+    pub keyboard: Option<Keyboard>,
+    /// F3 stays held without a finger on it (HoldF3), for F3 combos with
+    /// keys of the world.
+    pub f3_latched: bool,
+    /// The key each finger holds.
+    held_keys: BTreeMap<u64, KeyCode>,
+    /// Shift and Ctrl, toggled on and off by a tap.
+    latched_modifiers: BTreeSet<KeyCode>,
     /// Menu fingers drive a relative pointer instead of tapping (toggled by
     /// the menu row's Mouse button).
     pub virtual_mouse: bool,
@@ -87,12 +107,83 @@ pub enum Gesture {
 /// A button of the touch layer under a finger.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Action {
-    /// Press this key (Back is [`KeyCode::Escape`]).
+    /// Press this key while the finger stays down (Back is
+    /// [`KeyCode::Escape`]).
     Key(KeyCode),
+    /// Open or close the auxiliary keys.
+    More,
+    /// Open or close the on-screen keyboard.
+    Keyboard,
+    /// Toggle the held F3.
+    LatchF3,
+    /// Pick the block under the crosshair (the middle click).
+    Pick,
+    /// An F3 combo: F3 held while this key is tapped.
+    DebugCombo(KeyCode),
     /// Toggle the virtual mouse.
     VirtualMouse,
     /// Hold LMB (`false`) or RMB (`true`) while the finger stays down.
     MouseButton(bool),
+}
+
+/// The auxiliary keys' grid, four to a row, in order; after them comes
+/// HoldF3. Pick sends the middle click, the last four are F3 combos.
+const KEYS: [(&str, KeyCode); 28] = [
+    ("F1", KeyCode::F1),
+    ("F2", KeyCode::F2),
+    ("F3", KeyCode::F3),
+    ("F4", KeyCode::F4),
+    ("F5", KeyCode::F5),
+    ("F6", KeyCode::F6),
+    ("F7", KeyCode::F7),
+    ("F8", KeyCode::F8),
+    ("F9", KeyCode::F9),
+    ("F10", KeyCode::F10),
+    ("F11", KeyCode::F11),
+    ("F12", KeyCode::F12),
+    ("Tab", KeyCode::Tab),
+    ("Swap", KeyCode::KeyF),
+    ("Drop", KeyCode::KeyQ),
+    ("Adv", KeyCode::KeyL),
+    ("Chat", KeyCode::KeyT),
+    ("/", KeyCode::Slash),
+    ("Enter", KeyCode::Enter),
+    ("Esc", KeyCode::Escape),
+    ("Shift", KeyCode::ShiftLeft),
+    ("Ctrl", KeyCode::ControlLeft),
+    ("Inv", KeyCode::KeyE),
+    ("Pick", KeyCode::ContextMenu),
+    ("F3+B", KeyCode::KeyB),
+    ("F3+G", KeyCode::KeyG),
+    ("F3+A", KeyCode::KeyA),
+    ("F3+T", KeyCode::KeyT),
+];
+/// Where [`KEYS`] at `index` goes: Pick and the combos are their own actions.
+const PICK: usize = 23;
+const COMBOS: usize = 24;
+/// The grid's top left and a cell's step, in GUI pixels.
+const GRID: [f32; 2] = [3.0, 27.0];
+const CELL: [f32; 2] = [50.0, 24.0];
+
+/// The top row from the left: `...` always, the others while open, as
+/// `(label, x, width, action)`.
+const TOP_ROW: [(&str, f32, f32, Action); 5] = [
+    ("...", 3.0, 33.0, Action::More),
+    ("F3", 39.0, 33.0, Action::Key(KeyCode::F3)),
+    ("F5", 75.0, 33.0, Action::Key(KeyCode::F5)),
+    ("Chat", 111.0, 33.0, Action::Key(KeyCode::KeyT)),
+    ("Keys", 147.0, 39.0, Action::Keyboard),
+];
+
+/// The grid cell at `index` (`KEYS`, then HoldF3), `[x, y, w, h]`.
+fn grid_rect(index: usize) -> [f32; 4] {
+    let (column, row) = ((index % 4) as f32, (index / 4) as f32);
+    [
+        GRID[0] + column * CELL[0],
+        GRID[1] + row * CELL[1],
+        48.0,
+        ROW_H,
+    ]
 }
 
 /// The LMB and RMB buttons, `[x, y, w, h]` in GUI pixels, lower right.
@@ -132,6 +223,61 @@ pub fn draw_pointer(batch: &mut HudBatch, atlas: &HudAtlas, cursor: (f32, f32)) 
 }
 
 impl TouchUi {
+    /// A finger holds `key`; whether it is the first to hold it (only then
+    /// does the game get a press).
+    pub fn key_down(&mut self, id: u64, key: KeyCode) -> bool {
+        let first = !self.key_held(key);
+        self.held_keys.insert(id, key);
+        first
+    }
+
+    /// A finger lifts: the key to release, when it held one that nothing
+    /// else (another finger, the held F3) still holds.
+    pub fn key_up(&mut self, id: u64) -> Option<KeyCode> {
+        let key = self.held_keys.remove(&id)?;
+        (!self.key_held(key)).then_some(key)
+    }
+
+    /// The finger holds a key, so its release is the layer's.
+    pub fn owns_key(&self, id: u64) -> bool {
+        self.held_keys.contains_key(&id)
+    }
+
+    /// Tap Shift or Ctrl: whether it is now down.
+    pub fn toggle_modifier(&mut self, key: KeyCode) -> bool {
+        if self.latched_modifiers.remove(&key) {
+            false
+        } else {
+            self.latched_modifiers.insert(key);
+            true
+        }
+    }
+
+    pub fn modifier_latched(&self, key: KeyCode) -> bool {
+        self.latched_modifiers.contains(&key)
+    }
+
+    pub fn clear_modifiers(&mut self) {
+        self.latched_modifiers.clear();
+    }
+
+    /// A finger or the held F3 holds `key`.
+    pub fn key_held(&self, key: KeyCode) -> bool {
+        (key == KeyCode::F3 && self.f3_latched) || self.held_keys.values().any(|k| *k == key)
+    }
+
+    /// Let go of every held key and the held F3: the keys to release, each
+    /// once.
+    pub fn release_keys(&mut self) -> Vec<KeyCode> {
+        let mut keys: Vec<_> = std::mem::take(&mut self.held_keys).into_values().collect();
+        if std::mem::take(&mut self.f3_latched) {
+            keys.push(KeyCode::F3);
+        }
+        keys.sort();
+        keys.dedup();
+        keys
+    }
+
     /// A finger presses LMB or RMB; whether it is the first to hold that
     /// button (only then does the game get a press).
     pub fn press_mouse(&mut self, id: u64, right: bool) -> bool {
@@ -315,47 +461,103 @@ impl TouchUi {
 
     /// The touch layer's button under `p` (GUI pixels) on a `w` x `h` GUI,
     /// if any. `menu`: a screen is open (the menu row and the mouse
-    /// buttons show only there).
+    /// buttons show only there; the auxiliary keys show in a world too).
     pub fn action(&self, w: f32, h: f32, p: [f32; 2], menu: bool) -> Option<Action> {
-        if !menu {
-            return None;
-        }
-        if self.virtual_mouse
-            && let Some((_, right)) = mouse_button_rects(w, h)
+        if menu {
+            if self.virtual_mouse
+                && let Some((_, right)) = mouse_button_rects(w, h)
+                    .into_iter()
+                    .find(|(rect, _)| inside(*rect, p))
+            {
+                return Some(Action::MouseButton(right));
+            }
+            if let Some((_, action)) = menu_row_rects(w)
                 .into_iter()
                 .find(|(rect, _)| inside(*rect, p))
-        {
-            return Some(Action::MouseButton(right));
+            {
+                return Some(action);
+            }
         }
-        menu_row_rects(w)
-            .into_iter()
-            .find(|(rect, _)| inside(*rect, p))
-            .map(|(_, action)| action)
+        let shown = if self.expanded { 5 } else { 1 };
+        if let Some(&(_, _, _, action)) = TOP_ROW[..shown]
+            .iter()
+            .find(|(_, x, width, _)| inside([*x, 3.0, *width, ROW_H], p))
+        {
+            return Some(action);
+        }
+        if !self.expanded {
+            return None;
+        }
+        let index = (0..=KEYS.len()).find(|i| inside(grid_rect(*i), p))?;
+        Some(match KEYS.get(index) {
+            None => Action::LatchF3,
+            Some(_) if index == PICK => Action::Pick,
+            Some((_, key)) if index >= COMBOS => Action::DebugCombo(*key),
+            Some((_, key)) => Action::Key(*key),
+        })
     }
 
-    /// Draw the touch layer's buttons on a screen (`menu`), in GUI pixels.
+    /// Draw the touch layer's buttons, in GUI pixels; `menu` as in
+    /// [`Self::action`].
     pub fn draw(&self, b: &mut HudBatch, a: &HudAtlas, menu: bool) {
-        if !menu {
+        let shown = if self.expanded { 5 } else { 1 };
+        for (label, x, width, action) in &TOP_ROW[..shown] {
+            let held = *action == Action::Key(KeyCode::F3) && self.key_held(KeyCode::F3);
+            let label = if held { "F3*" } else { label };
+            button(b, a, [*x, 3.0, *width, ROW_H], label, held);
+        }
+        if menu {
+            for (rect, action) in menu_row_rects(b.width) {
+                let key = match action {
+                    Action::VirtualMouse if self.virtual_mouse => "horizon.touch.mouse_on",
+                    Action::VirtualMouse => "horizon.touch.mouse",
+                    _ => "gui.back",
+                };
+                button(b, a, rect, &lang::get(key), false);
+            }
+            if self.virtual_mouse {
+                for (rect, right) in mouse_button_rects(b.width, b.height) {
+                    let held = self.mouse_buttons.values().any(|v| *v == right);
+                    let key = if right {
+                        "horizon.touch.rmb"
+                    } else {
+                        "horizon.touch.lmb"
+                    };
+                    button(b, a, rect, &lang::get(key), held);
+                }
+            }
+        }
+        if !self.expanded {
             return;
         }
-        for (rect, action) in menu_row_rects(b.width) {
-            let key = match action {
-                Action::VirtualMouse if self.virtual_mouse => "horizon.touch.mouse_on",
-                Action::VirtualMouse => "horizon.touch.mouse",
-                _ => "gui.back",
-            };
-            button(b, a, rect, &lang::get(key), false);
+        for (i, (label, key)) in KEYS.iter().enumerate() {
+            let held = self.key_held(*key) || self.modifier_latched(*key);
+            button(b, a, grid_rect(i), label, held && i < PICK);
         }
-        if self.virtual_mouse {
-            for (rect, right) in mouse_button_rects(b.width, b.height) {
-                let held = self.mouse_buttons.values().any(|v| *v == right);
-                let key = if right {
-                    "horizon.touch.rmb"
-                } else {
-                    "horizon.touch.lmb"
-                };
-                button(b, a, rect, &lang::get(key), held);
-            }
+        let label = if self.f3_latched { "F3 ON" } else { "HoldF3" };
+        button(b, a, grid_rect(KEYS.len()), label, self.f3_latched);
+    }
+
+    /// A touch at `p` (GUI pixels) on the open on-screen keyboard, as
+    /// [`Self::draw_keyboard`] last drew it: what the key under it types, if
+    /// any.
+    pub fn keyboard_touch(
+        &mut self,
+        b: &mut HudBatch,
+        a: &HudAtlas,
+        p: [f32; 2],
+    ) -> Option<Output> {
+        let ui = Ui::new(a, b, (0.0, 0.0));
+        let at = p.map(|v| v * ui.batch.scale / ui.density);
+        self.keyboard.as_mut()?.touch(at)
+    }
+
+    /// Draw the open on-screen keyboard across the bottom of the screen.
+    pub fn draw_keyboard(&self, b: &mut HudBatch, a: &HudAtlas) {
+        if let Some(keyboard) = &self.keyboard {
+            let mut ui = Ui::new(a, b, (0.0, 0.0));
+            keyboard.draw(&mut ui, false, Glyphs::default());
+            ui.finish();
         }
     }
 }

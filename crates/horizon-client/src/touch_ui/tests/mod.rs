@@ -247,7 +247,7 @@ fn menu_mouse_buttons_share_ownership_and_release_outside_their_bounds() {
 }
 
 #[test]
-fn the_touch_layer_draws_only_on_screens() {
+fn the_menu_row_and_mouse_buttons_draw_only_on_screens() {
     let atlas = HudAtlas::build(std::path::Path::new("/nonexistent/horizon-touch-ui")).unwrap();
     let count = |ui: &TouchUi, menu: bool| {
         let mut b = HudBatch::new([1280, 720]);
@@ -255,11 +255,13 @@ fn the_touch_layer_draws_only_on_screens() {
         b.vertices.len()
     };
     let mut ui = TouchUi::default();
-    assert_eq!(count(&ui, false), 0);
+    // In a world only `...` shows.
+    let world = count(&ui, false);
     let row = count(&ui, true);
-    assert!(row > 0);
+    assert!(row > world);
     ui.virtual_mouse = true;
     assert!(count(&ui, true) > row);
+    assert_eq!(count(&ui, false), world);
     let mut b = HudBatch::new([1280, 720]);
     draw_pointer(&mut b, &atlas, (10.0, 10.0));
     assert!(!b.vertices.is_empty());
@@ -291,4 +293,186 @@ fn a_held_mouse_button_releases_after_a_screen_change() {
     );
     assert_eq!(ui.release_mouse(7), Some((true, true)));
     assert_eq!(aux_mouse_phase(false, ui.owns_mouse(7), false), None);
+}
+
+/// The middle of a grid cell or a top-row button.
+fn cell(index: usize) -> [f32; 2] {
+    let [x, y, w, h] = grid_rect(index);
+    [x + w / 2.0, y + h / 2.0]
+}
+
+#[test]
+fn the_auxiliary_keys_open_from_the_top_left_in_menus_and_worlds() {
+    let mut ui = TouchUi::default();
+    for menu in [false, true] {
+        assert_eq!(ui.action(W, H, [10.0, 10.0], menu), Some(Action::More));
+        // Closed: only `...` and nothing of the grid.
+        assert_eq!(ui.action(W, H, [50.0, 10.0], menu), None);
+        assert_eq!(ui.action(W, H, cell(0), menu), None);
+    }
+    ui.expanded = true;
+    for (x, action) in [
+        (50.0, Action::Key(KeyCode::F3)),
+        (90.0, Action::Key(KeyCode::F5)),
+        (120.0, Action::Key(KeyCode::KeyT)),
+        (160.0, Action::Keyboard),
+    ] {
+        assert_eq!(ui.action(W, H, [x, 10.0], false), Some(action));
+    }
+    // The gap between two buttons is no button.
+    assert_eq!(ui.action(W, H, [37.0, 10.0], false), None);
+}
+
+#[test]
+fn the_grid_maps_keys_combos_pick_and_the_held_f3() {
+    let ui = TouchUi {
+        expanded: true,
+        ..Default::default()
+    };
+    let at = |i| ui.action(W, H, cell(i), false);
+    assert_eq!(at(0), Some(Action::Key(KeyCode::F1)));
+    assert_eq!(at(11), Some(Action::Key(KeyCode::F12)));
+    assert_eq!(at(19), Some(Action::Key(KeyCode::Escape)));
+    assert_eq!(at(20), Some(Action::Key(KeyCode::ShiftLeft)));
+    assert_eq!(at(PICK), Some(Action::Pick));
+    assert_eq!(at(COMBOS), Some(Action::DebugCombo(KeyCode::KeyB)));
+    assert_eq!(at(27), Some(Action::DebugCombo(KeyCode::KeyT)));
+    assert_eq!(at(28), Some(Action::LatchF3));
+    // Beside HoldF3 on its row there is nothing.
+    assert_eq!(at(29), None);
+    // The menu row and mouse buttons still win on a screen.
+    assert_eq!(
+        ui.action(W, H, [400.0, 10.0], true),
+        Some(Action::Key(KeyCode::Escape))
+    );
+}
+
+#[test]
+fn simultaneous_f3_f4_and_f6_release_independently() {
+    let mut ui = TouchUi::default();
+    assert!(ui.key_down(10, KeyCode::F3));
+    assert!(ui.key_down(11, KeyCode::F4));
+    assert!(ui.key_held(KeyCode::F3));
+    assert_eq!(ui.key_up(11), Some(KeyCode::F4));
+    assert!(ui.key_down(12, KeyCode::F6));
+    assert_eq!(ui.key_up(12), Some(KeyCode::F6));
+    assert!(ui.key_held(KeyCode::F3));
+    assert_eq!(ui.key_up(10), Some(KeyCode::F3));
+    assert_eq!(ui.key_up(10), None);
+}
+
+#[test]
+fn shared_key_and_latch_do_not_release_early() {
+    let mut ui = TouchUi::default();
+    assert!(ui.key_down(1, KeyCode::F3));
+    assert!(!ui.key_down(2, KeyCode::F3));
+    assert_eq!(ui.key_up(1), None);
+    ui.f3_latched = true;
+    assert_eq!(ui.key_up(2), None);
+    assert!(ui.key_held(KeyCode::F3));
+    assert_eq!(ui.release_keys(), vec![KeyCode::F3]);
+    assert!(!ui.key_held(KeyCode::F3) && !ui.f3_latched);
+    ui.key_down(3, KeyCode::Tab);
+    ui.key_down(4, KeyCode::F1);
+    assert_eq!(ui.release_keys(), vec![KeyCode::Tab, KeyCode::F1]);
+    assert!(!ui.owns_key(3));
+}
+
+#[test]
+fn shift_and_ctrl_latch_until_tapped_again_or_cleared() {
+    let mut ui = TouchUi::default();
+    assert!(ui.toggle_modifier(KeyCode::ShiftLeft));
+    assert!(ui.toggle_modifier(KeyCode::ControlLeft));
+    assert!(ui.modifier_latched(KeyCode::ShiftLeft));
+    assert!(!ui.toggle_modifier(KeyCode::ShiftLeft));
+    assert!(!ui.modifier_latched(KeyCode::ShiftLeft));
+    ui.clear_modifiers();
+    assert!(!ui.modifier_latched(KeyCode::ControlLeft));
+}
+
+#[test]
+fn a_menu_press_survives_closing_the_menu_before_its_release() {
+    // Press a key, then the screen closes and redraws elsewhere: the release
+    // must still complete the press, through the owned key.
+    let mut ui = TouchUi::default();
+    let owned = |ui: &TouchUi| ui.owns_key(7);
+    assert_eq!(aux_mouse_phase(true, owned(&ui), false), None);
+    assert_eq!(
+        aux_mouse_phase(true, owned(&ui), true),
+        Some(TouchPhase::Started)
+    );
+    ui.key_down(7, KeyCode::KeyT);
+    assert_eq!(
+        aux_mouse_phase(false, owned(&ui), false),
+        Some(TouchPhase::Ended)
+    );
+    assert_eq!(ui.key_up(7), Some(KeyCode::KeyT));
+    // Everything released: later strays do nothing.
+    assert_eq!(aux_mouse_phase(false, owned(&ui), false), None);
+    assert_eq!(aux_mouse_phase(true, owned(&ui), false), None);
+}
+
+#[test]
+fn the_keys_draw_in_worlds_and_grow_when_open() {
+    let atlas = HudAtlas::build(std::path::Path::new("/nonexistent/horizon-touch-ui")).unwrap();
+    let count = |ui: &TouchUi| {
+        let mut b = HudBatch::new([1280, 720]);
+        ui.draw(&mut b, &atlas, false);
+        b.vertices.len()
+    };
+    let mut ui = TouchUi::default();
+    let closed = count(&ui);
+    assert!(closed > 0);
+    ui.expanded = true;
+    assert!(count(&ui) > closed);
+}
+
+#[test]
+fn touch_types_on_the_drawn_keyboard() {
+    let atlas = HudAtlas::build(std::path::Path::new("/nonexistent/horizon-touch-ui")).unwrap();
+    let mut b = HudBatch::new([1280, 720]);
+    let mut k = Keyboard::default();
+    // Nothing drawn yet: no keys to touch.
+    assert_eq!(k.touch([370.0, 70.0]), None);
+    let mut ui = Ui::new(&atlas, &mut b, (0.0, 0.0));
+    k.draw(&mut ui, true, Glyphs::default());
+    // On 1280 x 720 pixels the 554 dp of keys are centred from x 346 dp, at
+    // the top from y 16. q is on the second row under the digits, Done at
+    // the bottom right.
+    assert_eq!(k.keys_at(), Some([346.0, 16.0]));
+    assert_eq!(k.touch([370.0, 70.0]), Some(Output::Text("q".into())));
+    assert_eq!(k.touch([880.0, 210.0]), Some(Output::Done));
+    assert_eq!(k.touch([20.0, 20.0]), None);
+    // Between two keys (the gap after q) types nothing.
+    assert_eq!(k.touch([398.0, 70.0]), None);
+}
+
+#[test]
+fn the_touch_keyboard_types_only_while_open() {
+    let atlas = HudAtlas::build(std::path::Path::new("/nonexistent/horizon-touch-ui")).unwrap();
+    let mut b = HudBatch::new([1280, 720]);
+    let mut ui = TouchUi::default();
+    let (w, h, per_gui) = {
+        let theme = Ui::new(&atlas, &mut b, (0.0, 0.0));
+        (theme.w, theme.h, theme.density / theme.batch.scale)
+    };
+    let closed = [400.0, 400.0];
+    assert_eq!(ui.keyboard_touch(&mut b, &atlas, closed), None);
+    ui.keyboard = Some(Keyboard::default());
+    // Open but not drawn yet: nowhere to type.
+    assert_eq!(ui.keyboard_touch(&mut b, &atlas, closed), None);
+    let before = b.vertices.len();
+    ui.draw_keyboard(&mut b, &atlas);
+    assert!(b.vertices.len() > before);
+    // Drawn centred across the bottom, the hint lines under the keys.
+    let [x0, y0] = ui.keyboard.as_ref().unwrap().keys_at().unwrap();
+    assert_eq!(x0, ((w - 554.0) / 2.0).round());
+    assert!(y0 > h / 2.0 && y0 + 214.0 < h - 16.0);
+    // From dp back to GUI pixels: half a key into q, half a key into the
+    // second row (38 dp keys, 6 dp gaps).
+    let q = [(x0 + 25.0) * per_gui, (y0 + 63.0) * per_gui];
+    assert_eq!(
+        ui.keyboard_touch(&mut b, &atlas, q),
+        Some(Output::Text("q".into()))
+    );
 }
