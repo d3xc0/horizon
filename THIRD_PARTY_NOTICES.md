@@ -384,3 +384,5 @@ NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FO
 OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
 CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 ```
+`crates/horizon-client-render/src/atlas_fit.rs` is adapted from `fit_mobile_atlas` in Starling's
+`crates/horizon-client-render/src/hud.rs` at the same commit.

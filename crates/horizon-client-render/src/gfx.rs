@@ -2829,7 +2829,7 @@ impl Renderer {
         let info = adapter.get_info();
         crate::graphics::suggest_reduced_far_detail(crate::graphics::lod_capped(&info));
         let size = window.inner_size();
-        let max_side = device.limits().max_texture_dimension_2d;
+        let max_side = crate::atlas_fit::note_limit(device.limits().max_texture_dimension_2d);
         let configured = match (&surface, configured) {
             (Some(_), Some(configured)) => Some(configured),
             (Some(surface), None) => Some(set_up_surface(
