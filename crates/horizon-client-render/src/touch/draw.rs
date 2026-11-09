@@ -195,8 +195,9 @@ pub(super) fn alpha(opacity: f32) -> u8 {
 }
 
 /// A labelled button: the pack's button sprite, or a plain frame when the
-/// pack has none. A held button darkens and its label drops a pixel.
-pub(super) fn button(
+/// pack has none. A held button darkens and its label drops a pixel. Also
+/// the menu touch layer's buttons (`horizon_client::touch_ui`).
+pub fn button(
     b: &mut HudBatch,
     a: &HudAtlas,
     bounds: [f32; 4],

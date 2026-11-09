@@ -20,6 +20,7 @@ pub use aim::{
     projectile_crosshair, screen_direction,
 };
 pub use custom::CustomButton;
+pub use draw::button;
 pub use editor::{Editor, EditorExit};
 pub use layout::{Control, Mode, Placement, Settings};
 
