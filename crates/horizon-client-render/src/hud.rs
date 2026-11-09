@@ -1553,7 +1553,7 @@ impl HudAtlas {
                     })
                 })
                 .collect();
-            crate::paged_maps::build((width, height), &mapped, MAX_ATLAS_SIZE)
+            crate::paged_maps::build((width, height), &mapped, atlas_limit)
         };
         let white = sprites["horizon/white"];
         let glint = Self::glint_texture(root, defaults, "enchanted_glint_item");
