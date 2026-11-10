@@ -9,6 +9,7 @@
 //! scheme's factory layout; Cancel restores everything as it was opened.
 use super::{Control, CustomButton, Settings, TouchControls, draw, layout};
 use crate::hud::{HudAtlas, HudBatch, rgba};
+use crate::lang;
 
 /// How the editor closed. After [`EditorExit::Done`] the game saves
 /// [`TouchControls::settings`].
@@ -217,12 +218,12 @@ impl TouchControls {
     /// The editor's toolbar, drawn under the controls.
     pub(super) fn draw_editor_toolbar(&self, b: &mut HudBatch, a: &HudAtlas) {
         for (rect, label) in [
-            (DONE, "Done"),
-            (CANCEL, "Cancel"),
-            (RESET, "Reset"),
-            (PALETTE, "Add buttons..."),
+            (DONE, "gui.done"),
+            (CANCEL, "gui.cancel"),
+            (RESET, "horizon.touch.editor.reset"),
+            (PALETTE, "horizon.touch.editor.add"),
         ] {
-            plate(b, a, rect, label, false);
+            plate(b, a, rect, &lang::get(label), false);
         }
     }
 
@@ -234,9 +235,12 @@ impl TouchControls {
         let (w, h) = (b.width, b.height);
         if let Some(selected) = e.selected {
             let p = self.placement(selected);
-            plate(b, a, REMOVE, "Remove button", false);
-            plate(b, a, OPACITY, "Opacity", e.slider == Some(Slider::Opacity));
-            plate(b, a, SIZE, "Size", e.slider == Some(Slider::Size));
+            let remove = lang::get("horizon.touch.editor.remove");
+            plate(b, a, REMOVE, &remove, false);
+            let opacity = lang::get("horizon.touch.editor.opacity");
+            plate(b, a, OPACITY, &opacity, e.slider == Some(Slider::Opacity));
+            let size = lang::get("horizon.touch.editor.size");
+            plate(b, a, SIZE, &size, e.slider == Some(Slider::Size));
             if let Some(slider) = e.slider {
                 b.fill(
                     a,
@@ -246,17 +250,18 @@ impl TouchControls {
                     h * 0.18,
                     rgba(15, 15, 15, 235),
                 );
-                let label = if e.apply_all {
-                    "Apply to all: On"
-                } else {
-                    "Apply to all: Off"
-                };
-                plate(b, a, APPLY_ALL, label, e.apply_all);
+                let state = lang::get(match e.apply_all {
+                    true => "options.on",
+                    false => "options.off",
+                });
+                let all = lang::get("horizon.touch.editor.apply_all");
+                let label = lang::tr("options.generic_value", &[&all, &state]);
+                plate(b, a, APPLY_ALL, &label, e.apply_all);
                 let (value, percent) = match slider {
                     Slider::Size => ((p.size - SIZES[0]) / (SIZES[1] - SIZES[0]), p.size),
                     Slider::Opacity => (p.opacity, p.opacity),
                 };
-                let text = format!("{} {:.0}%", selected.name(), percent * 100.0);
+                let text = format!("{} {:.0}%", lang::get(selected.name()), percent * 100.0);
                 b.text(
                     a,
                     &text,
@@ -280,7 +285,7 @@ impl TouchControls {
             for (index, control) in Control::ALL.into_iter().enumerate() {
                 let shown = self.visible(control);
                 let mark = if shown { "[-]" } else { "[+]" };
-                let label = format!("{mark} {}", control.name());
+                let label = format!("{mark} {}", lang::get(control.name()));
                 plate(b, a, palette_rect(index), &label, shown);
             }
         }
