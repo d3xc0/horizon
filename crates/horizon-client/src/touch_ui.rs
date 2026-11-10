@@ -18,6 +18,7 @@
 //!   corner hold a button down for dragging.
 //! - The menu row at the top right: the virtual mouse toggle and Back.
 use crate::hud::{HudAtlas, HudBatch, rgba};
+use crate::lang;
 use crate::widgets::{self, Kind};
 use std::collections::BTreeMap;
 use std::time::{Duration, Instant};
@@ -336,17 +337,22 @@ impl TouchUi {
             return;
         }
         for (rect, action) in menu_row_rects(b.width) {
-            let label = match action {
-                Action::VirtualMouse if self.virtual_mouse => "Mouse ON",
-                Action::VirtualMouse => "Mouse",
-                _ => "Back",
+            let key = match action {
+                Action::VirtualMouse if self.virtual_mouse => "horizon.touch.mouse_on",
+                Action::VirtualMouse => "horizon.touch.mouse",
+                _ => "gui.back",
             };
-            button(b, a, rect, label, false);
+            button(b, a, rect, &lang::get(key), false);
         }
         if self.virtual_mouse {
             for (rect, right) in mouse_button_rects(b.width, b.height) {
                 let held = self.mouse_buttons.values().any(|v| *v == right);
-                button(b, a, rect, if right { "RMB" } else { "LMB" }, held);
+                let key = if right {
+                    "horizon.touch.rmb"
+                } else {
+                    "horizon.touch.lmb"
+                };
+                button(b, a, rect, &lang::get(key), held);
             }
         }
     }
