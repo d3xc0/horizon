@@ -41,6 +41,20 @@ fn inventory_shift_and_mouse_hold_independently_and_cancel_cleanly() {
 }
 
 #[test]
+fn a_new_finger_on_a_custom_button_presses_it_with_the_inventory_open() {
+    let mut t = with_button("key.keyboard.z");
+    t.inventory_mode = true;
+    let p = t.custom_placement(0).center;
+    assert!(t.inventory_update(1, p, true, false));
+    assert_eq!(t.key_events(), [("key.keyboard.z".into(), true)]);
+    assert!(t.inventory_update(1, p, false, false));
+    assert!(t.key_events().is_empty());
+    assert!(t.inventory_update(1, p, false, true));
+    assert_eq!(t.key_events(), [("key.keyboard.z".into(), false)]);
+    assert_eq!(t.held_custom_tokens().count(), 0);
+}
+
+#[test]
 fn the_inventory_keeps_the_players_visibility_and_placements() {
     let mut t = TouchControls::default();
     for mode in Mode::ALL {

@@ -80,8 +80,10 @@ impl TouchControls {
         started: bool,
         ended: bool,
     ) -> bool {
-        if self.custom_fingers.contains_key(&id) {
-            return self.custom_update(id, point, false, ended);
+        // A finger already on a custom button, or a new one landing on an
+        // assigned custom button, presses its key here too.
+        if self.custom_update(id, point, started, ended) {
+            return true;
         }
         if started
             && self.custom_at(point).is_none()
