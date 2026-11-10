@@ -51,7 +51,7 @@ impl CustomButton {
     /// What the button shows: the key's name or the action's translated name.
     pub fn label(&self) -> String {
         if self.key == UNASSIGNED {
-            return "Button".into();
+            return crate::lang::get("horizon.touch.button");
         }
         if let Some(name) = self.key.strip_prefix("action:") {
             return crate::text::Text::translate(name, &[]).plain();

@@ -67,7 +67,10 @@ fn an_unassigned_button_sends_nothing_and_falls_through() {
     t.update(1, point, true, false);
     assert!(t.key_events().is_empty());
     assert!(matches!(role(&t, 1), Role::Look { .. }));
-    assert_eq!(t.settings.custom_buttons[0].label(), "Button");
+    assert_eq!(
+        t.settings.custom_buttons[0].label(),
+        crate::lang::get("horizon.touch.button")
+    );
 }
 
 #[test]
