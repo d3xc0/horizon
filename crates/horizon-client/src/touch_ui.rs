@@ -126,7 +126,7 @@ pub enum Action {
     MouseButton(bool),
 }
 
-/// The auxiliary keys' grid, four to a row, in order; after them comes
+/// The auxiliary keys' grid (labels as in [`label`]), four to a row, in order; after them comes
 /// HoldF3. Pick sends the middle click, the last four are F3 combos.
 const KEYS: [(&str, KeyCode); 28] = [
     ("F1", KeyCode::F1),
@@ -141,18 +141,18 @@ const KEYS: [(&str, KeyCode); 28] = [
     ("F10", KeyCode::F10),
     ("F11", KeyCode::F11),
     ("F12", KeyCode::F12),
-    ("Tab", KeyCode::Tab),
-    ("Swap", KeyCode::KeyF),
-    ("Drop", KeyCode::KeyQ),
-    ("Adv", KeyCode::KeyL),
-    ("Chat", KeyCode::KeyT),
+    ("horizon.touch.key.tab", KeyCode::Tab),
+    ("horizon.touch.swap", KeyCode::KeyF),
+    ("horizon.touch.key.drop", KeyCode::KeyQ),
+    ("horizon.touch.key.advancements", KeyCode::KeyL),
+    ("horizon.touch.chat", KeyCode::KeyT),
     ("/", KeyCode::Slash),
-    ("Enter", KeyCode::Enter),
-    ("Esc", KeyCode::Escape),
-    ("Shift", KeyCode::ShiftLeft),
-    ("Ctrl", KeyCode::ControlLeft),
-    ("Inv", KeyCode::KeyE),
-    ("Pick", KeyCode::ContextMenu),
+    ("horizon.touch.key.enter", KeyCode::Enter),
+    ("horizon.touch.key.escape", KeyCode::Escape),
+    ("horizon.touch.key.shift", KeyCode::ShiftLeft),
+    ("horizon.touch.key.control", KeyCode::ControlLeft),
+    ("horizon.touch.key.inventory", KeyCode::KeyE),
+    ("horizon.touch.key.pick", KeyCode::ContextMenu),
     ("F3+B", KeyCode::KeyB),
     ("F3+G", KeyCode::KeyG),
     ("F3+A", KeyCode::KeyA),
@@ -166,13 +166,18 @@ const GRID: [f32; 2] = [3.0, 27.0];
 const CELL: [f32; 2] = [50.0, 24.0];
 
 /// The top row from the left: `...` always, the others while open, as
-/// `(label, x, width, action)`.
+/// `(label, x, width, action)`, labels as in [`label`].
 const TOP_ROW: [(&str, f32, f32, Action); 5] = [
     ("...", 3.0, 33.0, Action::More),
     ("F3", 39.0, 33.0, Action::Key(KeyCode::F3)),
     ("F5", 75.0, 33.0, Action::Key(KeyCode::F5)),
-    ("Chat", 111.0, 33.0, Action::Key(KeyCode::KeyT)),
-    ("Keys", 147.0, 39.0, Action::Keyboard),
+    (
+        "horizon.touch.chat",
+        111.0,
+        33.0,
+        Action::Key(KeyCode::KeyT),
+    ),
+    ("horizon.touch.keys", 147.0, 39.0, Action::Keyboard),
 ];
 
 /// The grid cell at `index` (`KEYS`, then HoldF3), `[x, y, w, h]`.
@@ -501,10 +506,10 @@ impl TouchUi {
     /// [`Self::action`].
     pub fn draw(&self, b: &mut HudBatch, a: &HudAtlas, menu: bool) {
         let shown = if self.expanded { 5 } else { 1 };
-        for (label, x, width, action) in &TOP_ROW[..shown] {
+        for (text, x, width, action) in &TOP_ROW[..shown] {
             let held = *action == Action::Key(KeyCode::F3) && self.key_held(KeyCode::F3);
-            let label = if held { "F3*" } else { label };
-            button(b, a, [*x, 3.0, *width, ROW_H], label, held);
+            let label = if held { "F3*".to_owned() } else { label(text) };
+            button(b, a, [*x, 3.0, *width, ROW_H], &label, held);
         }
         if menu {
             for (rect, action) in menu_row_rects(b.width) {
@@ -530,12 +535,17 @@ impl TouchUi {
         if !self.expanded {
             return;
         }
-        for (i, (label, key)) in KEYS.iter().enumerate() {
+        for (i, (text, key)) in KEYS.iter().enumerate() {
             let held = self.key_held(*key) || self.modifier_latched(*key);
-            button(b, a, grid_rect(i), label, held && i < PICK);
+            button(b, a, grid_rect(i), &label(text), held && i < PICK);
         }
-        let label = if self.f3_latched { "F3 ON" } else { "HoldF3" };
-        button(b, a, grid_rect(KEYS.len()), label, self.f3_latched);
+        let key = if self.f3_latched {
+            "horizon.touch.f3_on"
+        } else {
+            "horizon.touch.hold_f3"
+        };
+        let text = lang::get(key);
+        button(b, a, grid_rect(KEYS.len()), &text, self.f3_latched);
     }
 
     /// A touch at `p` (GUI pixels) on the open on-screen keyboard, as
@@ -559,6 +569,17 @@ impl TouchUi {
             keyboard.draw(&mut ui, false, Glyphs::default());
             ui.finish();
         }
+    }
+}
+
+/// A button label: a `horizon.touch.*` translation key in the player's
+/// language, or a key name ("F1", "/", "F3+B") that reads the same in every
+/// language.
+fn label(text: &str) -> String {
+    if text.starts_with("horizon.touch.") {
+        lang::get(text)
+    } else {
+        text.to_owned()
     }
 }
 
