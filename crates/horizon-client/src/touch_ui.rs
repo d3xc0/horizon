@@ -576,7 +576,8 @@ impl TouchUi {
 /// language, or a key name ("F1", "/", "F3+B") that reads the same in every
 /// language.
 fn label(text: &str) -> String {
-    if text.starts_with("horizon.touch.") {
+    // Split, not one prefix literal: the en_us key check reads every dotted string as a key.
+    if text.split('.').take(2).eq(["horizon", "touch"]) {
         lang::get(text)
     } else {
         text.to_owned()
