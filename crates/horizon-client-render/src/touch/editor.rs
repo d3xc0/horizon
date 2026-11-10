@@ -413,7 +413,11 @@ impl TouchControls {
         started: bool,
         ended: bool,
     ) -> bool {
-        if started && p[1] < PALETTE[1] {
+        if started
+            && [DONE, CANCEL, RESET, PALETTE]
+                .iter()
+                .any(|&r| layout::contains(r, p))
+        {
             return false; // the toolbar
         }
         if e.key_picker {

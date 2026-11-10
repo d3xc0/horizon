@@ -102,6 +102,17 @@ fn custom_buttons_drag_resize_and_remove() {
 }
 
 #[test]
+fn a_button_beside_the_toolbar_can_be_picked_again() {
+    let mut t = created();
+    t.capture_custom_key("key.keyboard.z");
+    t.settings.custom_buttons[0].layouts[0].center = [0.8, 0.06];
+    tap(&mut t, 3, [0.9, 0.3]); // elsewhere: deselect
+    assert_eq!(t.editor.as_ref().unwrap().selected_custom, None);
+    tap(&mut t, 4, [0.8, 0.06]);
+    assert_eq!(t.editor.as_ref().unwrap().selected_custom, Some(0));
+}
+
+#[test]
 fn the_palette_still_reaches_its_last_entries_and_holds_at_most_32() {
     let mut t = TouchControls::default();
     t.settings.offhand_button = false;
