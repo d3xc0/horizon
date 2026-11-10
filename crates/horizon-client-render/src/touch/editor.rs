@@ -566,7 +566,8 @@ impl TouchControls {
     fn draw_custom_editor(&self, b: &mut HudBatch, a: &HudAtlas, e: &Editor) {
         let (w, h) = (b.width, b.height);
         if e.palette {
-            plate(b, a, CREATE, "Create button...", false);
+            let create = lang::get("horizon.touch.editor.create");
+            plate(b, a, CREATE, &create, false);
         }
         if let Some(index) = e.selected_custom
             && !e.palette
@@ -574,10 +575,14 @@ impl TouchControls {
         {
             let button = &self.settings.custom_buttons[index];
             let p = button.layouts[self.settings.mode.index()];
-            plate(b, a, ACTION, &format!("Action: {}", button.label()), false);
-            plate(b, a, OPACITY, "Opacity", e.slider == Some(Slider::Opacity));
-            plate(b, a, SIZE, "Size", e.slider == Some(Slider::Size));
-            plate(b, a, REMOVE, "Remove button", false);
+            let action = lang::tr("horizon.touch.editor.action", &[&button.label()]);
+            plate(b, a, ACTION, &action, false);
+            let opacity = lang::get("horizon.touch.editor.opacity");
+            plate(b, a, OPACITY, &opacity, e.slider == Some(Slider::Opacity));
+            let size = lang::get("horizon.touch.editor.size");
+            plate(b, a, SIZE, &size, e.slider == Some(Slider::Size));
+            let remove = lang::get("horizon.touch.editor.remove");
+            plate(b, a, REMOVE, &remove, false);
             if let Some(slider) = e.slider {
                 b.fill(
                     a,
@@ -588,8 +593,8 @@ impl TouchControls {
                     rgba(15, 15, 15, 235),
                 );
                 let (name, value, percent) = match slider {
-                    Slider::Size => ("Size", (p.size - SIZES[0]) / (SIZES[1] - SIZES[0]), p.size),
-                    Slider::Opacity => ("Opacity", p.opacity, p.opacity),
+                    Slider::Size => (size, (p.size - SIZES[0]) / (SIZES[1] - SIZES[0]), p.size),
+                    Slider::Opacity => (opacity, p.opacity, p.opacity),
                 };
                 let text = format!("{name} {:.0}%", percent * 100.0);
                 b.text(
@@ -612,8 +617,10 @@ impl TouchControls {
                 h * 0.81,
                 rgba(15, 15, 15, 250),
             );
-            plate(b, a, PICK_ACTIONS, "Game action", !e.raw_keys);
-            plate(b, a, PICK_KEYS, "Keyboard key", e.raw_keys);
+            let actions = lang::get("horizon.touch.editor.game_action");
+            plate(b, a, PICK_ACTIONS, &actions, !e.raw_keys);
+            let keys = lang::get("horizon.touch.editor.keyboard_key");
+            plate(b, a, PICK_KEYS, &keys, e.raw_keys);
             let choices = choices(e.raw_keys);
             for (i, (_, label)) in choices
                 .iter()
@@ -623,9 +630,13 @@ impl TouchControls {
             {
                 plate(b, a, key_rect(i), label, false);
             }
-            plate(b, a, PREVIOUS, "Previous", false);
-            plate(b, a, BACK, "Back", false);
-            plate(b, a, NEXT, "Next", false);
+            for (rect, key) in [
+                (PREVIOUS, "horizon.touch.editor.previous"),
+                (BACK, "gui.back"),
+                (NEXT, "horizon.touch.editor.next"),
+            ] {
+                plate(b, a, rect, &lang::get(key), false);
+            }
         }
     }
 }
