@@ -192,3 +192,21 @@ fn the_editor_shows_and_drags_controls_the_game_hides() {
     t.cancel_editor();
     assert!(!t.visible(Control::Shield));
 }
+
+#[test]
+fn the_shield_can_be_picked_and_dragged_without_one_equipped() {
+    let mut t = TouchControls::default();
+    t.settings.button_visibility[Control::Shield as usize] = layout::SHOWN;
+    assert!(!t.shield_available);
+    t.open_editor();
+    assert!(t.visible(Control::Shield));
+    let center = t.placement(Control::Shield).center;
+    t.edit_touch(1, center, true, false);
+    assert_eq!(t.editor.as_ref().unwrap().selected, Some(Control::Shield));
+    let to = [center[0] - 0.05, center[1] - 0.05];
+    t.edit_touch(1, to, false, true);
+    let moved = t.settings.placement(Control::Shield).center;
+    assert!((moved[0] - to[0]).abs() < 0.001 && (moved[1] - to[1]).abs() < 0.001);
+    t.cancel_editor();
+    assert!(!t.visible(Control::Shield));
+}

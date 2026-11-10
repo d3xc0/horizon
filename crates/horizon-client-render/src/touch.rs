@@ -97,6 +97,9 @@ pub struct TouchControls {
     pub inventory_shift: bool,
     /// The layout editor, while it is open: it takes every touch.
     pub editor: Option<Editor>,
+    /// [`Self::edit_touch`] has the editor out of [`Self::editor`] while it
+    /// handles a touch: still editing, for visibility and hit-testing.
+    editing: bool,
     /// A long hold on the world uses the held item instead of mining. Read when
     /// a finger lands, so a change mid-hold (the last apple eaten) can't turn
     /// eating into mining.
@@ -130,6 +133,11 @@ pub struct TouchControls {
 }
 
 impl TouchControls {
+    /// The layout editor is open, including while it handles a touch.
+    fn editing(&self) -> bool {
+        self.editing || self.editor.is_some()
+    }
+
     /// Whether attack and use act on the crosshair rather than on a tap.
     pub fn crosshair(&self) -> bool {
         self.force_crosshair || self.settings.crosshair()
@@ -197,7 +205,7 @@ impl TouchControls {
             if !self.visible(c) {
                 return false;
             }
-            if c == Control::Move && self.dynamic_joystick() && self.editor.is_none() {
+            if c == Control::Move && self.dynamic_joystick() && !self.editing() {
                 let area = self.dynamic_area();
                 return !self.inventory_mode
                     && area[2] > 0.0
@@ -233,7 +241,7 @@ impl TouchControls {
     fn visible(&self, c: Control) -> bool {
         let visibility = self.settings.button_visibility[c as usize];
         if c == Control::Shield
-            && ((!self.shield_available && self.editor.is_none())
+            && ((!self.shield_available && !self.editing())
                 || (self.force_crosshair
                     && visibility == layout::FOLLOW_SCHEME
                     && self.settings.button_visibility[Control::Use as usize]

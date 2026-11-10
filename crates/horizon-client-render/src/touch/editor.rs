@@ -102,7 +102,23 @@ impl TouchControls {
         started: bool,
         ended: bool,
     ) -> Option<EditorExit> {
-        let mut e = self.editor.take()?;
+        let e = self.editor.take()?;
+        self.editing = true;
+        let exit = self.edit_touch_with(e, id, p, started, ended);
+        self.editing = false;
+        exit
+    }
+
+    /// [`Self::edit_touch`] with the editor taken out; puts it back unless
+    /// the touch closed it.
+    fn edit_touch_with(
+        &mut self,
+        mut e: Editor,
+        id: u64,
+        p: [f32; 2],
+        started: bool,
+        ended: bool,
+    ) -> Option<EditorExit> {
         self.clicked |= started;
         if started {
             if layout::contains(DONE, p) {
