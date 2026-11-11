@@ -80,8 +80,14 @@ fn a_finger_on_a_slider_drags_it_until_it_lifts() {
     // Off the slider now, and the other finger: still only finger 2.
     assert!(u.direct_pointer(2, [300.0, 200.0], TouchPhase::Moved));
     assert!(!u.direct_pointer(1, [50.0, 20.0], TouchPhase::Moved));
+    // A second finger landing on the slider takes nothing from finger 2.
+    assert!(!u.direct_pointer(3, [50.0, 20.0], TouchPhase::Started));
+    assert!(u.direct_pointer(2, [310.0, 200.0], TouchPhase::Moved));
+    assert!(!u.direct_pointer(3, [60.0, 20.0], TouchPhase::Ended));
     assert!(u.direct_pointer(2, [300.0, 200.0], TouchPhase::Ended));
     assert!(!u.direct_pointer(2, [300.0, 200.0], TouchPhase::Moved));
+    // Once it lifts, the next finger on the slider has it.
+    assert!(u.direct_pointer(4, [50.0, 20.0], TouchPhase::Started));
 }
 
 #[test]

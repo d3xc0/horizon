@@ -256,9 +256,11 @@ impl TouchUi {
 
     /// Whether this finger drives the pointer directly, like a mouse with its
     /// button held: one that lands on a slider of the last drawn frame keeps
-    /// it until it lifts. `p` is in GUI pixels.
+    /// it until it lifts, and another finger landing on a slider meanwhile
+    /// takes nothing. `p` is in GUI pixels.
     pub fn direct_pointer(&mut self, id: u64, p: [f32; 2], phase: TouchPhase) -> bool {
         if phase == TouchPhase::Started
+            && self.pointer_drag.is_none()
             && widgets::last_targets()
                 .iter()
                 .any(|t| matches!(t.kind, Kind::Slider { .. }) && inside(t.rect, p))
