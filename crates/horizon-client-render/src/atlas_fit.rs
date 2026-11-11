@@ -9,7 +9,7 @@
 
 use crate::Result;
 use crate::hud::{HudAtlas, MAX_ATLAS_SIZE, PackedImage, TextureFlags};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicU32, Ordering};
 
 /// The GPU's `max_texture_dimension_2d` once a renderer has opened its device.
@@ -23,18 +23,21 @@ pub(crate) fn note_limit(limit: u32) -> u32 {
 }
 
 /// Fit `images` (before their blur borders) to the GPU's limit, and that limit: the largest atlas
-/// side `HudAtlas::pack` lays out.
+/// side `HudAtlas::pack` lays out. `leave_out` (the custom item textures) is what
+/// `HudAtlas::layout_leaving_out` drops when the atlas doesn't fit, so a pack that fits without
+/// them keeps every texel, as before.
 pub(crate) fn fit(
     images: &mut [PackedImage],
     gui_sizes: &mut HashMap<String, (u32, u32)>,
     flags: &HashMap<String, TextureFlags>,
+    leave_out: &HashSet<String>,
 ) -> Result<u32> {
     let limit = TEXTURE_LIMIT.load(Ordering::Relaxed).min(MAX_ATLAS_SIZE);
-    fit_atlas(images, gui_sizes, flags, limit)?;
+    fit_atlas(images, gui_sizes, flags, leave_out, limit)?;
     Ok(limit)
 }
 
-/// Halve the larger sprites until the atlas fits `limit` texels a side. Fonts, GUI sprites,
+/// Halve the larger sprites until the atlas, `leave_out` aside, fits `limit` texels a side. Fonts, GUI sprites,
 /// Horizon's own sprites and run-time slots, and sprites of 32x32 or less keep their size. A
 /// halved sprite keeps its original size in `gui_sizes`, so it draws at the same size (and with
 /// the same UVs) from fewer texels. The last layout's error when nothing is left to halve.
@@ -42,12 +45,14 @@ fn fit_atlas(
     images: &mut [PackedImage],
     gui_sizes: &mut HashMap<String, (u32, u32)>,
     flags: &HashMap<String, TextureFlags>,
+    leave_out: &HashSet<String>,
     limit: u32,
 ) -> Result<()> {
     loop {
         // The sizes `HudAtlas::pack` lays out: a blurred sprite gets a border of one texel.
         let mut sizes: Vec<PackedImage> = images
             .iter()
+            .filter(|i| !leave_out.contains(&i.0))
             .map(|(name, w, h, _)| {
                 let border = if flags.get(name).is_some_and(|f| f.blur) {
                     2
@@ -126,7 +131,14 @@ mod tests {
         assert!(layout(&images, MAX_ATLAS_SIZE).is_ok());
         assert!(layout(&images, 4096).is_err());
         let mut sizes = HashMap::new();
-        fit_atlas(&mut images, &mut sizes, &HashMap::new(), 4096).unwrap();
+        fit_atlas(
+            &mut images,
+            &mut sizes,
+            &HashMap::new(),
+            &HashSet::new(),
+            4096,
+        )
+        .unwrap();
         // Halved until they fit (2048 -> 512), drawn at their size.
         assert_eq!((images[0].1, images[0].2), (512, 512));
         assert_eq!(images[0].3.len(), 512 * 512 * 4);
@@ -147,8 +159,31 @@ mod tests {
         let mut images: Vec<PackedImage> =
             (0..400).map(|i| solid(&format!("i{i}"), 64, 0)).collect();
         let mut sizes = HashMap::new();
-        fit_atlas(&mut images, &mut sizes, &HashMap::new(), 8192).unwrap();
+        fit_atlas(
+            &mut images,
+            &mut sizes,
+            &HashMap::new(),
+            &HashSet::new(),
+            8192,
+        )
+        .unwrap();
         assert!(images.iter().all(|i| (i.1, i.2) == (64, 64)));
+        assert!(sizes.is_empty());
+    }
+
+    #[test]
+    fn a_pack_that_fits_without_its_custom_item_textures_keeps_every_sprite() {
+        // Fits 8192 once the custom item textures are left out, as it loads today:
+        // nothing is halved, `layout_leaving_out` drops them instead.
+        let mut images: Vec<PackedImage> = (0..3)
+            .map(|i| solid(&format!("entity/mob{i}"), 2048, 0))
+            .collect();
+        let cit: HashSet<String> = (0..40).map(|i| format!("cit/sword{i}")).collect();
+        images.extend(cit.iter().map(|name| solid(name, 1024, 0)));
+        assert!(layout(&images, 8192).is_err());
+        let mut sizes = HashMap::new();
+        fit_atlas(&mut images, &mut sizes, &HashMap::new(), &cit, 8192).unwrap();
+        assert!(images.iter().all(|i| i.1 == 2048 || i.1 == 1024));
         assert!(sizes.is_empty());
     }
 
@@ -157,7 +192,14 @@ mod tests {
         let mut images: Vec<PackedImage> = (0..40)
             .map(|i| solid(&format!("gui/big{i}"), 2048, 0))
             .collect();
-        let error = fit_atlas(&mut images, &mut HashMap::new(), &HashMap::new(), 4096).unwrap_err();
+        let error = fit_atlas(
+            &mut images,
+            &mut HashMap::new(),
+            &HashMap::new(),
+            &HashSet::new(),
+            4096,
+        )
+        .unwrap_err();
         assert!(
             error.to_string().contains("do not fit a 4096x4096 atlas"),
             "{error}"
@@ -170,7 +212,7 @@ mod tests {
         let mut sizes = HashMap::new();
         note_limit(32768);
         assert_eq!(
-            fit(&mut images, &mut sizes, &HashMap::new()).unwrap(),
+            fit(&mut images, &mut sizes, &HashMap::new(), &HashSet::new()).unwrap(),
             MAX_ATLAS_SIZE
         );
         note_limit(MAX_ATLAS_SIZE);

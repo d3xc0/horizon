@@ -359,6 +359,9 @@ state of Starling's `crates/horizon-client-render/src/touch.rs` at the same comm
 `crates/horizon-client-render/src/android_runtime.rs` and `android_runtime/tests/` are adapted from the
 input part of Starling's `crates/horizon-client-render/src/android_runtime.rs` at the same commit.
 
+`crates/horizon-client-render/src/atlas_fit.rs` is adapted from `fit_mobile_atlas` in Starling's
+`crates/horizon-client-render/src/hud.rs` at the same commit.
+
 ## PCG3D hash
 
 `hash3` in `crates/horizon-client-render/src/hdr.wgsl`, the noise HDR10 output's dither is made from, is the
@@ -384,5 +387,3 @@ NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FO
 OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
 CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 ```
-`crates/horizon-client-render/src/atlas_fit.rs` is adapted from `fit_mobile_atlas` in Starling's
-`crates/horizon-client-render/src/hud.rs` at the same commit.

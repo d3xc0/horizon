@@ -1442,7 +1442,7 @@ impl HudAtlas {
                 .collect();
             images.push((MISSING_SPRITE.into(), 16, 16, missing));
         }
-        let atlas_limit = crate::atlas_fit::fit(&mut images, &mut gui_sizes, &flags)?;
+        let atlas_limit = crate::atlas_fit::fit(&mut images, &mut gui_sizes, &flags, &cit_names)?;
         // Blurred sprites are sampled linearly in the atlas (screen.wgsl): a
         // border wrapped from their own edges keeps the filter off their
         // neighbours, as repeat addressing of their own texture would.
