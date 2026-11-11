@@ -3,8 +3,9 @@
 // Starling contributors. Copyright (c) 2026 Ludovic Marie and the Horizon contributors, under the
 // same MIT license as Horizon (LICENSE at the repository root).
 
-//! The shared atlas on a GPU that allows less than `MAX_ATLAS_SIZE` texels a side: the larger
-//! sprites are halved until the atlas fits, instead of the pack failing to load.
+//! The shared atlas when a pack's sprites don't fit the GPU's limit (or `MAX_ATLAS_SIZE`, the
+//! largest side Horizon lays out): the larger sprites are halved until the atlas fits, instead of
+//! the pack failing to load.
 
 use crate::Result;
 use crate::hud::{HudAtlas, MAX_ATLAS_SIZE, PackedImage, TextureFlags};
@@ -29,9 +30,7 @@ pub(crate) fn fit(
     flags: &HashMap<String, TextureFlags>,
 ) -> Result<u32> {
     let limit = TEXTURE_LIMIT.load(Ordering::Relaxed).min(MAX_ATLAS_SIZE);
-    if limit < MAX_ATLAS_SIZE {
-        fit_atlas(images, gui_sizes, flags, limit)?;
-    }
+    fit_atlas(images, gui_sizes, flags, limit)?;
     Ok(limit)
 }
 
@@ -89,7 +88,7 @@ fn fit_atlas(
         if !halved {
             return Err(error);
         }
-        log::info!("halved the larger atlas sprites to fit this GPU's {limit}x{limit} limit");
+        log::info!("halved the larger atlas sprites to fit a {limit}x{limit} atlas");
     }
 }
 
@@ -166,7 +165,7 @@ mod tests {
     }
 
     #[test]
-    fn a_gpu_at_the_largest_atlas_side_changes_nothing() {
+    fn a_pack_that_fits_the_largest_atlas_side_is_untouched() {
         let mut images = vec![solid("entity/large", 2048, 5)];
         let mut sizes = HashMap::new();
         note_limit(32768);
