@@ -413,7 +413,7 @@ fn first_frame(
 }
 /// `image` inside a one-texel border copied from its opposite edges, the
 /// texels repeat addressing reads past each edge.
-fn wrap_border((name, w, h, data): &PackedImage) -> PackedImage {
+pub(crate) fn wrap_border((name, w, h, data): &PackedImage) -> PackedImage {
     let (bw, bh) = (w + 2, h + 2);
     let mut out = Vec::with_capacity((bw * bh * 4) as usize);
     for y in 0..bh {
@@ -1425,7 +1425,7 @@ impl HudAtlas {
                 .collect();
             images.push((MISSING_SPRITE.into(), 16, 16, missing));
         }
-        let atlas_limit = crate::atlas_fit::fit(&mut images, &mut gui_sizes, &flags, &cit_names)?;
+        let atlas_limit = crate::atlas_fit::limit();
         // Blurred sprites are sampled linearly in the atlas (screen.wgsl): a
         // border wrapped from their own edges keeps the filter off their
         // neighbours, as repeat addressing of their own texture would.
@@ -1450,8 +1450,8 @@ impl HudAtlas {
         )
         .or_else(|error| -> Result<_> {
             let models = reducible_model_sprites(root, &images, &bordered);
-            let layout =
-                Self::layout_reducing_models(&mut images, &mut gui_sizes, &models, atlas_limit)?;
+            let (sizes, sets) = (&mut gui_sizes, (&models, &bordered));
+            let layout = crate::atlas_fit::layout_reducing(&mut images, sizes, sets, atlas_limit)?;
             log::warn!("reduced HUD model texture resolution to keep the resource pack: {error}");
             Ok(layout)
         })?;
